@@ -3,3 +3,6 @@ from .csp_lda_model import CSPLDAModel
 from .csp_svm_model import CSPSVMModel
 from .labram_model import LaBraMModel
 from .neurogpt_model import NeuroGPTModel
+from .revebase_model import ReveBaseModel
+from .eegembed_model import EEGEmbedModel
+from .jepa_model import JEPAModel

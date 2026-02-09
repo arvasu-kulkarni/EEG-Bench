@@ -89,6 +89,7 @@ def print_classification_results(
         }
 
     # Iterate over models and create tables
+    summary_by_model = {}
     for model_name, y_pred, y_test in zip(model_names, y_preds, y_trues):
         output += "-" * 25 + f" {model_name} " + "-" * 25 + "\n"
 
@@ -102,6 +103,9 @@ def print_classification_results(
             combined_y_test = np.concatenate(y_test)
             combined_y_pred = np.concatenate(y_pred)
             combined_metrics = calculate_metrics(combined_y_test, combined_y_pred)
+
+        # Track combined metrics for summary across repetitions
+        summary_by_model.setdefault(model_name, []).append(combined_metrics)
 
         # Create a table for combined and per-dataset metrics
         results = []
@@ -142,6 +146,37 @@ def print_classification_results(
 
         # Append table to output
         output += metrics_table.to_string(index=False)
+        output += "\n"
+
+    # Summary table across repetitions
+    if summary_by_model:
+        metric_names = [
+            "Accuracy",
+            "Balanced Accuracy",
+            "Weighted F1",
+            "Macro F1",
+            "ROC AUC",
+            "Average Precision",
+            "Cohen Kappa",
+            "Precision",
+            "Recall",
+        ]
+        summary_rows = []
+        for model_name, metrics_list in summary_by_model.items():
+            row = [model_name]
+            for metric_name in metric_names:
+                values = np.array([m[metric_name] for m in metrics_list], dtype=float)
+                mean_value = float(np.mean(values)) if len(values) else 0.0
+                max_dev = float(np.max(np.abs(values - mean_value))) if len(values) else 0.0
+                row.append(f"{mean_value:.6f} +/- {max_dev:.6f}")
+            summary_rows.append(row)
+
+        summary_table = pd.DataFrame(
+            summary_rows,
+            columns=["Model"] + metric_names,
+        )
+        output += "\n" + "=" * 20 + " Repetition Summary " + "=" * 20 + "\n"
+        output += summary_table.to_string(index=False)
         output += "\n"
 
     # Print the results to the console

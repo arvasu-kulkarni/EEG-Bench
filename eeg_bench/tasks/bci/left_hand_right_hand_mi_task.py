@@ -4,11 +4,11 @@ from ...datasets.bci import (
     BCICompIV2bMDataset,
     Weibo2014MDataset,
     Cho2017MDataset,
-    Liu2022MDataset,
+    # Liu2022MDataset,
     Schirrmeister2017MDataset,
     PhysionetMIMDataset,
     Zhou2016MDataset,
-    Kaya2018Dataset,
+    # Kaya2018Dataset,
 )
 from ...enums.bci_classes import BCIClasses
 from sklearn.metrics import f1_score
@@ -25,11 +25,11 @@ class LeftHandvRightHandMITask(AbstractBCITask):
                 BCICompIV2bMDataset,
                 Weibo2014MDataset,
                 Cho2017MDataset,
-                Liu2022MDataset, # gave rather bad results
+                # Liu2022MDataset, # gave rather bad results
                 Schirrmeister2017MDataset,
                 PhysionetMIMDataset,
                 Zhou2016MDataset,
-                Kaya2018Dataset,
+                # Kaya2018Dataset,
             ],
             subjects_split={
                 BCICompIV2aMDataset: {
@@ -48,10 +48,10 @@ class LeftHandvRightHandMITask(AbstractBCITask):
                     Split.TRAIN: list(range(1, 10)),
                     Split.TEST: list(range(10, 15)),
                 },
-                Liu2022MDataset: {
-                    Split.TRAIN: list(range(1, 10)),
-                    Split.TEST: list(range(10, 15)),
-                },
+                # Liu2022MDataset: {
+                #     Split.TRAIN: list(range(1, 10)),
+                #     Split.TEST: list(range(10, 15)),
+                # },
                 Schirrmeister2017MDataset: {
                     Split.TRAIN: list(range(1, 12)),
                     Split.TEST: list(range(12, 15)),
@@ -64,10 +64,10 @@ class LeftHandvRightHandMITask(AbstractBCITask):
                     Split.TRAIN: [],
                     Split.TEST: list(range(1, 5)),
                 },
-                Kaya2018Dataset: {
-                    Split.TRAIN: ["B", "C", "E", "F", "G", "H", "I", "J", "K"],
-                    Split.TEST: ["A", "L", "M"],
-                }
+                # Kaya2018Dataset: {
+                #     Split.TRAIN: ["B", "C", "E", "F", "G", "H", "I", "J", "K"],
+                #     Split.TEST: ["A", "L", "M"],
+                # }
             },
         )
 

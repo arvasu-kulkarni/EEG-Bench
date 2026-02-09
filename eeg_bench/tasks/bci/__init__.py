@@ -3,3 +3,4 @@ from .left_hand_right_hand_feet_tongue_mi_task import LeftHandvRightHandvFeetvTo
 from .left_hand_right_hand_mi_task import LeftHandvRightHandMITask
 from .right_hand_feet_mi_task import RightHandvFeetMITask
 from .five_fingers_mi_task import FiveFingersMITask
+from .minitask import bcicompiv2a

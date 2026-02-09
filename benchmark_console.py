@@ -2,6 +2,8 @@ import argparse
 import logging
 from tqdm import tqdm
 from eeg_bench.enums.split import Split
+from eeg_bench.models.bci.eegembed_model import EEGEmbedModel
+from eeg_bench.models.bci.jepa_model import JEPAModel
 from eeg_bench.tasks.clinical import (
     AbnormalClinicalTask,
     SchizophreniaClinicalTask,
@@ -19,6 +21,7 @@ from eeg_bench.tasks.bci import (
     RightHandvFeetMITask,
     LeftHandvRightHandvFeetvTongueMITask,
     FiveFingersMITask,
+    bcicompiv2a
 )
 from eeg_bench.models.clinical import (
     BrainfeaturesLDAModel as BrainfeaturesLDA,
@@ -33,10 +36,14 @@ from eeg_bench.models.bci import (
     LaBraMModel as LaBraMBci,
     BENDRModel as BENDRBci,
     NeuroGPTModel as NeuroGPTBci,
+    ReveBaseModel as ReveBaseBci,
+
 )
 from eeg_bench.utils.evaluate_and_plot import print_classification_results, generate_classification_plots
 from eeg_bench.utils.utils import set_seed, save_results, get_multilabel_tasks
 from eeg_bench.models.clinical.LaBraM.utils_2 import make_multilabels
+
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
@@ -87,18 +94,19 @@ def benchmark(tasks, models, seed, reps):
 
 
 def main():
+
     parser = argparse.ArgumentParser(
         description="Run EEG-Bench for a specific task and model."
     )
     parser.add_argument(
         "--task",
         type=str,
-        help="Task to run. Options: parkinsons, schizophrenia, mtbi, ocd, epilepsy, abnormal, sleep_stages, seizure, binary_artifact, multiclass_artifact, left_right, right_feet, left_right_feet_tongue, 5_fingers"
+        help="Task to run. Options: parkinsons, schizophrenia, mtbi, ocd, epilepsy, abnormal, sleep_stages, seizure, binary_artifact, multiclass_artifact, left_right, right_feet, left_right_feet_tongue, 5_fingers, bci42a"
     )
     parser.add_argument(
         "--model",
         type=str,
-        help="Model to use. Options: lda, svm, labram, bendr, neurogpt"
+        help="Model to use. Options: lda, svm, labram, bendr, neurogpt, revebase"
     )
     parser.add_argument(
         "--seed",
@@ -136,6 +144,7 @@ def main():
         "seizure": SeizureClinicalTask,
         "binary_artifact": ArtifactBinaryClinicalTask,
         "multiclass_artifact": ArtifactMulticlassClinicalTask,
+        "bci42a": bcicompiv2a
     }
 
     # Mapping command-line strings to model classes
@@ -152,6 +161,9 @@ def main():
         "labram": LaBraMBci,
         "bendr": BENDRBci,
         "neurogpt": NeuroGPTBci,
+        "revebase": ReveBaseBci,
+        "eegembed": EEGEmbedModel,
+        "jepa": JEPAModel
     }
 
     if args.all:
@@ -179,7 +191,7 @@ def main():
         
         if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact"]:
             models_map = clinical_models_map
-        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers"]:
+        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a"]:
             models_map = bci_models_map
         else:
             models_map = {}
