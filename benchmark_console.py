@@ -24,7 +24,10 @@ from eeg_bench.tasks.bci import (
     bcicompiv2a,
     bcicompiv2b,
     weibo2014,
-    cho2017
+    cho2017,
+    bcicompiv2a_4class,
+    schirrmeister2017,
+    physionetmi
 )
 from eeg_bench.models.clinical import (
     BrainfeaturesLDAModel as BrainfeaturesLDA,
@@ -58,30 +61,41 @@ BCI_MODEL_TASK_EMBED_DIMS = {
         "bci42a": 45056,
         "bci42b": 6144,
         "weibo2014": 122880,
-        "cho2017": 98304
+        "cho2017": 98304,
+        "bci42a_4class": 45056,
+        "schirrmeister2017": 262144,
+        "physionetmi": 96768,
     },
     "eegembed": {
         "bci42a": 45056,
         "bci42b": 6144,
         "weibo2014": 122880,
-        "cho2017": 98304
+        "cho2017": 98304,
+        "bci42a_4class": 45056,
+        "schirrmeister2017": 147456,
+        "physionetmi": 98304,
     },
     "jepa": {
         "bci42a": 256,
         "bci42b": 256,
         "weibo2014": 256,
-        "cho2017": 256
+        "cho2017": 256,
+        "bci42a_4class": 256,
+        "schirrmeister2017": 256,
+        "physionetmi": 256,
     },
 }
 
 
-def _get_model_kwargs(model_key, task_key):
-    if model_key not in BCI_MODEL_TASK_EMBED_DIMS:
-        return {}
-    task_dims = BCI_MODEL_TASK_EMBED_DIMS[model_key]
-    if task_key not in task_dims:
-        return {}
-    return {"embedding_dim": task_dims[task_key]}
+def _get_model_kwargs(model_key, task_key, num_classes=None):
+    kwargs = {}
+    if model_key in BCI_MODEL_TASK_EMBED_DIMS:
+        task_dims = BCI_MODEL_TASK_EMBED_DIMS[model_key]
+        if task_key in task_dims:
+            kwargs["embedding_dim"] = task_dims[task_key]
+    if num_classes is not None and model_key in {"revebase", "eegembed", "jepa"}:
+        kwargs["num_classes"] = num_classes
+    return kwargs
 
 
 def benchmark(tasks, models, seed, reps, task_key=None):
@@ -97,11 +111,13 @@ def benchmark(tasks, models, seed, reps, task_key=None):
         y_trues = []
         y_trains = []
         is_multilabel_task = task.name in get_multilabel_tasks()
+        num_classes = len(task.classes) if hasattr(task, "classes") else None
         for model_key, model_class in models:
             print(f'running {model_key} on {task.name}')
-            for i in tqdm(range(reps)):
+            for i in range(reps):
+                print(f"Repetition {i+1}/{reps} with seed {seed + i}")
                 set_seed(seed + i)  # set seed for reproducibility
-                model_kwargs = _get_model_kwargs(model_key, task_key)
+                model_kwargs = _get_model_kwargs(model_key, task_key, num_classes=num_classes)
                 if is_multilabel_task:
                     num_classes = len(task.clinical_classes) + 1
                     model = model_class(
@@ -187,7 +203,10 @@ def main():
         "bci42a": bcicompiv2a,
         "bci42b": bcicompiv2b,
         "weibo2014": weibo2014,
-        "cho2017": cho2017
+        "cho2017": cho2017,
+        "bci42a_4class": bcicompiv2a_4class,
+        "schirrmeister2017": schirrmeister2017,
+        "physionetmi": physionetmi
     }
 
     # Mapping command-line strings to model classes
@@ -236,7 +255,7 @@ def main():
         
         if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact"]:
             models_map = clinical_models_map
-        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017"]:
+        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017", "bci42a_4class", "schirrmeister2017", "physionetmi"]:
             models_map = bci_models_map
         else:
             models_map = {}

@@ -10,10 +10,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from ..abstract_model import AbstractModel
 from .LaBraM.utils_2 import calc_class_weights, map_label, n_unique_labels, reverse_map_label
 
+ignore_chans = ['TPP9h', 'TPP10h', 'AFF1', 'AFF2', 'FFC5h', 'FFC3h', 'FFC4h', 'FFC6h', 'FCC5h', 'FCC3h', 'FCC4h', 'FCC6h', 'CCP5h', 'CCP3h', 'CCP4h', 'CCP6h', 'CPP5h', 'CPP3h', 'CPP4h', 'CPP6h', 'PPO1', 'PPO2', 'I1', 'I2', 'AFp3h', 'AFp4h', 'AFF5h', 'AFF6h', 'FFT7h', 'FFC1h', 'FFC2h', 'FFT8h', 'FTT9h', 'FTT7h', 'FCC1h', 'FCC2h', 'FTT8h', 'FTT10h', 'TTP7h', 'CCP1h', 'CCP2h', 'TTP8h', 'TPP7h', 'CPP1h', 'CPP2h', 'TPP8h', 'PPO9h', 'PPO5h', 'PPO6h', 'PPO10h', 'POO9h', 'POO3h', 'POO4h', 'POO10h', 'OI1h', 'OI2h']
 
 class EEGEmbedBaseDataset(Dataset):
     def __init__(self, data: np.ndarray, labels: Optional[np.ndarray] = None, pos: Optional[torch.Tensor] = None):
@@ -44,6 +46,7 @@ class EEGEmbedModel(AbstractModel):
         lr: float = 2e-4,
         weight_decay: float = 2e-4,
         embedding_dim: Optional[int] = None,
+        num_classes: int = 2,
     ):
         super().__init__("EEGEmbedModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -55,7 +58,11 @@ class EEGEmbedModel(AbstractModel):
         self.weight_decay = weight_decay
 
         dim = embedding_dim if embedding_dim is not None else 45056
-        self.model = MyReveClassifier(checkpoint_path=checkpoint_path, num_classes=2, flat_dim=dim).to(self.device)
+        self.model = MyReveClassifier(
+            checkpoint_path=checkpoint_path,
+            num_classes=num_classes,
+            flat_dim=dim,
+        ).to(self.device)
 
         self.task_name: Optional[str] = None
         self.num_classes: Optional[int] = None
@@ -63,6 +70,10 @@ class EEGEmbedModel(AbstractModel):
     def _make_positions(self, meta: Dict) -> torch.Tensor:
         # get position from montage assuming 1020
         ch_names = meta["channel_names"]
+
+        # remove ignored channels
+        ch_names = [ch for ch in ch_names if ch not in ignore_chans]
+
         mne_raw_info = mne.create_info(ch_names, sfreq=100, ch_types="eeg")
         raw_obj = mne.io.RawArray(np.zeros((len(ch_names), 100)), mne_raw_info)
         montage = mne.channels.make_standard_montage("standard_1020")
@@ -73,6 +84,10 @@ class EEGEmbedModel(AbstractModel):
     def _select_channels_and_pos(self, data: np.ndarray, ch_names: List[str]) -> Tuple[np.ndarray, torch.Tensor]:
         selected_data = data.astype(np.float32)
         pos = self._make_positions({"channel_names": ch_names})
+
+        keep_idxs = [i for i, ch in enumerate(ch_names) if ch not in ignore_chans]
+        selected_data = selected_data[:, keep_idxs, :]
+
         return selected_data, pos
 
     def normalize(self, data: np.ndarray) -> np.ndarray:
@@ -148,7 +163,7 @@ class EEGEmbedModel(AbstractModel):
         self.model.train()
         for _ in range(self.epochs):
             for loader in loaders:
-                for xb, yb, posb in loader:
+                for xb, yb, posb in tqdm(loader):
                     xb = xb.to(self.device)
                     yb = yb.to(self.device)
                     optimizer.zero_grad()
@@ -173,7 +188,7 @@ class EEGEmbedModel(AbstractModel):
             loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 
             batch_preds = []
-            for xb, posb in loader:
+            for xb, posb in tqdm(loader):
                 xb = xb.to(self.device)
                 logits = self._forward(xb, posb)
                 preds = torch.argmax(logits, dim=1)

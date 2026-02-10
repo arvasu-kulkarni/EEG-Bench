@@ -7,3 +7,6 @@ from .minitask import bcicompiv2a
 from .bci_iv_2b import bcicompiv2b
 from .weibo2014 import weibo2014
 from .cho2017 import cho2017
+from .bci_iv_2a_4class import bcicompiv2a_4class
+from .schirrmeister2017 import schirrmeister2017
+from .physionetmi import physionetmi

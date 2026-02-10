@@ -15,6 +15,7 @@ from huggingface_hub import login
 from ..abstract_model import AbstractModel
 from .LaBraM.utils_2 import calc_class_weights, map_label, n_unique_labels, reverse_map_label
 
+from tqdm import tqdm
 
 class ReveBaseDataset(Dataset):
     def __init__(self, data: np.ndarray, labels: Optional[np.ndarray] = None, pos: Optional[torch.Tensor] = None):
@@ -45,6 +46,7 @@ class ReveBaseModel(AbstractModel):
         lr: float = 2e-4,
         weight_decay: float = 2e-4,
         embedding_dim: Optional[int] = None,
+        num_classes: int = 2,
     ):
         super().__init__("ReveBaseModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -72,7 +74,7 @@ class ReveBaseModel(AbstractModel):
             torch.nn.Flatten(),
             torch.nn.RMSNorm(dim),
             torch.nn.Dropout(0.1),
-            torch.nn.Linear(dim, 2),
+            torch.nn.Linear(dim, num_classes),
         ).to(self.device)
         
         self.task_name: Optional[str] = None
@@ -80,13 +82,21 @@ class ReveBaseModel(AbstractModel):
 
     def _make_positions(self, ch_names: List[str]) -> torch.Tensor:
         pos = self.pos_bank(ch_names)
+        pos_bank_chans = self.pos_bank.config.position_names
+
+        missing_chans = [ch for ch in ch_names if ch not in pos_bank_chans]
+
         if isinstance(pos, (tuple, list)):
             pos = pos[0]
-        return pos
+        return pos, missing_chans
 
     def _select_channels_and_pos(self, data: np.ndarray, ch_names: List[str]) -> Tuple[np.ndarray, torch.Tensor]:
         selected_data = data.astype(np.float32)
-        pos = self._make_positions(ch_names)
+        pos, missing_chans = self._make_positions(ch_names)
+        if missing_chans:
+            print(f"Warning: The following channels are missing from the position bank and will be ignored: {missing_chans}")
+            keep_idxs = [i for i, ch in enumerate(ch_names) if ch not in missing_chans]
+            selected_data = selected_data[:, keep_idxs, :]
         return selected_data, pos
 
     def _forward(self, x: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
@@ -164,7 +174,7 @@ class ReveBaseModel(AbstractModel):
         self.model.train()
         for _ in range(self.epochs):
             for loader in loaders:
-                for xb, yb, posb in loader:
+                for xb, yb, posb in tqdm(loader):
                     xb = xb.to(self.device)
                     yb = yb.to(self.device)
                     optimizer.zero_grad()
@@ -191,7 +201,7 @@ class ReveBaseModel(AbstractModel):
             loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 
             batch_preds = []
-            for xb, posb in loader:
+            for xb, posb in tqdm(loader):
                 xb = xb.to(self.device)
                 logits = self._forward(xb, posb)
                 preds = torch.argmax(logits, dim=1)

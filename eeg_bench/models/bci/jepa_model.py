@@ -18,6 +18,8 @@ from huggingface_hub import login
 from ..abstract_model import AbstractModel
 from .LaBraM.utils_2 import calc_class_weights, map_label, n_unique_labels, reverse_map_label
 
+from tqdm import tqdm
+
 STANDARD_JEPA_CHANNELS = [
     "Fp1",
     "Fp2",
@@ -71,6 +73,7 @@ class JEPAModel(AbstractModel):
         lr: float = 2e-5,
         weight_decay: float = 2e-4,
         embedding_dim: Optional[int] = None,
+        num_classes: int = 2,
     ):
         super().__init__("JEPAModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -83,7 +86,7 @@ class JEPAModel(AbstractModel):
 
         self.model = EEG_JEPA_MAE_Classifier(
             checkpoint_path=checkpoint_path,
-            num_classes=2,
+            num_classes=num_classes,
             embedding_dim=embedding_dim,
         ).to(self.device)
 
@@ -217,7 +220,7 @@ class JEPAModel(AbstractModel):
         self.model.train()
         for _ in range(self.epochs):
             for loader in loaders:
-                for xb, yb, posb in loader:
+                for xb, yb, posb in tqdm(loader):
                     xb = xb.to(self.device)
                     yb = yb.to(self.device)
                     optimizer.zero_grad()
@@ -244,7 +247,7 @@ class JEPAModel(AbstractModel):
             loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False, num_workers=0)
 
             batch_preds = []
-            for xb, posb in loader:
+            for xb, posb in tqdm(loader):
                 xb = xb.to(self.device)
                 logits = self._forward(xb, posb)
                 preds = torch.argmax(logits, dim=1)
