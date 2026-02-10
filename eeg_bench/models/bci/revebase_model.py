@@ -15,12 +15,6 @@ from huggingface_hub import login
 from ..abstract_model import AbstractModel
 from .LaBraM.utils_2 import calc_class_weights, map_label, n_unique_labels, reverse_map_label
 
-# STANDARD_CHANNELS = [
-#     "Fp1", "Fp2", "F3", "F4", "F7", "F8", "T3", "T4", "C3", "C4",
-#     "T5", "T6", "P3", "P4", "O1", "O2", "Fz", "Cz", "Pz",
-# ]
-
-STANDARD_CHANNELS = ["FZ", "FC3", "FC1", "FC2", "FC4", "C5", "C3", "C1", "CZ", "C2", "C4", "C6", "CP3", "CP1", "CP2", "CP4", "P1", "P2", "PZ", "CPZ", "POZ", "FCZ"]
 
 class ReveBaseDataset(Dataset):
     def __init__(self, data: np.ndarray, labels: Optional[np.ndarray] = None, pos: Optional[torch.Tensor] = None):
@@ -50,6 +44,7 @@ class ReveBaseModel(AbstractModel):
         epochs: int = 10,
         lr: float = 2e-4,
         weight_decay: float = 2e-4,
+        embedding_dim: Optional[int] = None,
     ):
         super().__init__("ReveBaseModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -70,10 +65,9 @@ class ReveBaseModel(AbstractModel):
             trust_remote_code=True,
             token=True
         )
-        self.pos_full = self._make_positions()
 
         # final_layer in reve-base arch
-        dim = 45056
+        dim = embedding_dim if embedding_dim is not None else 45056
         self.model.final_layer = torch.nn.Sequential(
             torch.nn.Flatten(),
             torch.nn.RMSNorm(dim),
@@ -84,32 +78,16 @@ class ReveBaseModel(AbstractModel):
         self.task_name: Optional[str] = None
         self.num_classes: Optional[int] = None
 
-    def _make_positions(self) -> torch.Tensor:
-        pos = self.pos_bank(STANDARD_CHANNELS)
+    def _make_positions(self, ch_names: List[str]) -> torch.Tensor:
+        pos = self.pos_bank(ch_names)
         if isinstance(pos, (tuple, list)):
             pos = pos[0]
-        print(f"Loaded positions - {pos.shape}, {pos}")
         return pos
 
     def _select_channels_and_pos(self, data: np.ndarray, ch_names: List[str]) -> Tuple[np.ndarray, torch.Tensor]:
-        ch_upper = [ch.upper() for ch in ch_names]
-        standard_upper = [ch.upper() for ch in STANDARD_CHANNELS]
-        standard_idx = {ch: idx for idx, ch in enumerate(standard_upper)}
-
-        data_indices = [ch_upper.index(ch) for ch in standard_upper if ch in ch_upper]
-        pos_indices = [standard_idx[ch] for ch in standard_upper if ch in ch_upper]
-
-        # This works even if the order of channels is different in both. Check by printing
-        print(ch_upper)
-        print(data_indices)
-        print(standard_upper)
-        print(pos_indices)
-
-        selected_data = data[:, data_indices, :].astype(np.float32)
-        pos = self.pos_full
-        print(pos.shape)    # expect 2dim
-        selected_pos = pos[pos_indices, :]
-        return selected_data, selected_pos
+        selected_data = data.astype(np.float32)
+        pos = self._make_positions(ch_names)
+        return selected_data, pos
 
     def _forward(self, x: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
         if pos.ndim == 2:

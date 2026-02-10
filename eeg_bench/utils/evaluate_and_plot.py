@@ -144,6 +144,9 @@ def print_classification_results(
             columns=["", "Accuracy", "Balanced Accuracy", "Weighted F1", "Macro F1", "ROC AUC", "Average Precision", "Cohen Kappa", "Precision", "Recall"],
         )
 
+        for col in metrics_table.columns[1:]:
+            metrics_table[col] = metrics_table[col].map(lambda v: format(float(v), ".4g"))
+
         # Append table to output
         output += metrics_table.to_string(index=False)
         output += "\n"
@@ -168,7 +171,7 @@ def print_classification_results(
                 values = np.array([m[metric_name] for m in metrics_list], dtype=float)
                 mean_value = float(np.mean(values)) if len(values) else 0.0
                 max_dev = float(np.max(np.abs(values - mean_value))) if len(values) else 0.0
-                row.append(f"{mean_value:.6f} +/- {max_dev:.6f}")
+                row.append(f"{mean_value:.4g} +/- {max_dev:.4g}")
             summary_rows.append(row)
 
         summary_table = pd.DataFrame(
@@ -184,7 +187,14 @@ def print_classification_results(
 
     # Save results to a file if specified
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = os.path.join(get_config_value("results"), f"classification_results_{task_name}_{timestamp}.txt")
+    filename = os.path.join(get_config_value("results"), f"classification_results_{task_name}_{timestamp}")
+    
+    # add model names and task names to filename and remove spaces, replace with _
+
+    filename = filename.replace(" ", "_")
+    unique_model_names = list(dict.fromkeys(model_names))
+    filename = f"{filename}_{'_'.join(unique_model_names)}_{task_name}.txt"
+    
     with open(filename, 'w') as f:
         f.write(output)
     print(f"Results saved to {filename}")

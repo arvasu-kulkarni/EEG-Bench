@@ -14,8 +14,6 @@ from torch.utils.data import DataLoader, Dataset
 from ..abstract_model import AbstractModel
 from .LaBraM.utils_2 import calc_class_weights, map_label, n_unique_labels, reverse_map_label
 
-STANDARD_CHANNELS = ["FZ", "FC3", "FC1", "FC2", "FC4", "C5", "C3", "C1", "CZ", "C2", "C4", "C6", "CP3", "CP1", "CP2", "CP4", "P1", "P2", "PZ", "CPZ", "POZ", "FCZ"]
-
 
 class EEGEmbedBaseDataset(Dataset):
     def __init__(self, data: np.ndarray, labels: Optional[np.ndarray] = None, pos: Optional[torch.Tensor] = None):
@@ -45,6 +43,7 @@ class EEGEmbedModel(AbstractModel):
         epochs: int = 10,
         lr: float = 2e-4,
         weight_decay: float = 2e-4,
+        embedding_dim: Optional[int] = None,
     ):
         super().__init__("EEGEmbedModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -55,7 +54,7 @@ class EEGEmbedModel(AbstractModel):
         self.lr = lr
         self.weight_decay = weight_decay
 
-        dim = 45056
+        dim = embedding_dim if embedding_dim is not None else 45056
         self.model = MyReveClassifier(checkpoint_path=checkpoint_path, num_classes=2, flat_dim=dim).to(self.device)
 
         self.task_name: Optional[str] = None
@@ -72,24 +71,9 @@ class EEGEmbedModel(AbstractModel):
         return 100 * pos
 
     def _select_channels_and_pos(self, data: np.ndarray, ch_names: List[str]) -> Tuple[np.ndarray, torch.Tensor]:
-        ch_upper = [ch.upper() for ch in ch_names]
-        standard_upper = [ch.upper() for ch in STANDARD_CHANNELS]
-        standard_idx = {ch: idx for idx, ch in enumerate(standard_upper)}
-
-        data_indices = [ch_upper.index(ch) for ch in standard_upper if ch in ch_upper]
-        pos_indices = [standard_idx[ch] for ch in standard_upper if ch in ch_upper]
-
-        # This works even if the order of channels is different in both. Check by printing
-        print(ch_upper)
-        print(data_indices)
-        print(standard_upper)
-        print(pos_indices)
-
-        selected_data = data[:, data_indices, :].astype(np.float32)
+        selected_data = data.astype(np.float32)
         pos = self._make_positions({"channel_names": ch_names})
-        print(pos.shape)    # expect 2dim
-        selected_pos = pos[pos_indices, :]
-        return selected_data, selected_pos
+        return selected_data, pos
 
     def normalize(self, data: np.ndarray) -> np.ndarray:
         # assuming b x c x t

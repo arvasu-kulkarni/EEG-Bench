@@ -4,3 +4,6 @@ from .left_hand_right_hand_mi_task import LeftHandvRightHandMITask
 from .right_hand_feet_mi_task import RightHandvFeetMITask
 from .five_fingers_mi_task import FiveFingersMITask
 from .minitask import bcicompiv2a
+from .bci_iv_2b import bcicompiv2b
+from .weibo2014 import weibo2014
+from .cho2017 import cho2017

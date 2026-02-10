@@ -21,7 +21,10 @@ from eeg_bench.tasks.bci import (
     RightHandvFeetMITask,
     LeftHandvRightHandvFeetvTongueMITask,
     FiveFingersMITask,
-    bcicompiv2a
+    bcicompiv2a,
+    bcicompiv2b,
+    weibo2014,
+    cho2017
 )
 from eeg_bench.models.clinical import (
     BrainfeaturesLDAModel as BrainfeaturesLDA,
@@ -50,7 +53,38 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-def benchmark(tasks, models, seed, reps):
+BCI_MODEL_TASK_EMBED_DIMS = {
+    "revebase": {
+        "bci42a": 45056,
+        "bci42b": 6144,
+        "weibo2014": 122880,
+        "cho2017": 98304
+    },
+    "eegembed": {
+        "bci42a": 45056,
+        "bci42b": 6144,
+        "weibo2014": 122880,
+        "cho2017": 98304
+    },
+    "jepa": {
+        "bci42a": 256,
+        "bci42b": 256,
+        "weibo2014": 256,
+        "cho2017": 256
+    },
+}
+
+
+def _get_model_kwargs(model_key, task_key):
+    if model_key not in BCI_MODEL_TASK_EMBED_DIMS:
+        return {}
+    task_dims = BCI_MODEL_TASK_EMBED_DIMS[model_key]
+    if task_key not in task_dims:
+        return {}
+    return {"embedding_dim": task_dims[task_key]}
+
+
+def benchmark(tasks, models, seed, reps, task_key=None):
     for task in tasks:
         logger.info(f"Running benchmark for task {task}")
         X_train, y_train, meta_train = task.get_data(Split.TRAIN)
@@ -63,16 +97,22 @@ def benchmark(tasks, models, seed, reps):
         y_trues = []
         y_trains = []
         is_multilabel_task = task.name in get_multilabel_tasks()
-        for model_class in tqdm(models):
-            for i in range(reps):
+        for model_key, model_class in models:
+            print(f'running {model_key} on {task.name}')
+            for i in tqdm(range(reps)):
                 set_seed(seed + i)  # set seed for reproducibility
+                model_kwargs = _get_model_kwargs(model_key, task_key)
                 if is_multilabel_task:
                     num_classes = len(task.clinical_classes) + 1
-                    model = model_class(num_classes=num_classes, num_labels_per_chunk=task.num_labels_per_chunk)
+                    model = model_class(
+                        num_classes=num_classes,
+                        num_labels_per_chunk=task.num_labels_per_chunk,
+                        **model_kwargs,
+                    )
                     this_y_train = make_multilabels(X_train, y_train, task.event_map, task.chunk_len_s, task.num_labels_per_chunk, model.name)
                     this_y_test = make_multilabels(X_test, y_test, task.event_map, task.chunk_len_s, task.num_labels_per_chunk, model.name)
                 else:
-                    model = model_class()
+                    model = model_class(**model_kwargs)
                     this_y_train = y_train
                     this_y_test = y_test
 
@@ -106,7 +146,7 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        help="Model to use. Options: lda, svm, labram, bendr, neurogpt, revebase"
+        help="Model(s) to use. Comma-separated. Options: lda, svm, labram, bendr, neurogpt, revebase"
     )
     parser.add_argument(
         "--seed",
@@ -144,7 +184,10 @@ def main():
         "seizure": SeizureClinicalTask,
         "binary_artifact": ArtifactBinaryClinicalTask,
         "multiclass_artifact": ArtifactMulticlassClinicalTask,
-        "bci42a": bcicompiv2a
+        "bci42a": bcicompiv2a,
+        "bci42b": bcicompiv2b,
+        "weibo2014": weibo2014,
+        "cho2017": cho2017
     }
 
     # Mapping command-line strings to model classes
@@ -175,15 +218,17 @@ def main():
                 models_map = bci_models_map
 
             task_instance = task_cls()
-            model_classes = list(models_map.values())
-            benchmark([task_instance], model_classes, args.seed, args.reps)
+            model_classes = list(models_map.items())
+            benchmark([task_instance], model_classes, args.seed, args.reps, task_key=task_key)
 
     else:
         if not args.task or not args.model:
             parser.error("Both --task and --model must be specified unless --all is used.")
         
         task_key = args.task.lower()
-        model_key = args.model.lower()
+        model_keys = [m.strip().lower() for m in args.model.split(",") if m.strip()]
+        if not model_keys:
+            parser.error("At least one model must be specified.")
 
         if task_key not in tasks_map:
             parser.error(f"Invalid task specified. Choose from: {', '.join(tasks_map.keys())}")
@@ -191,17 +236,21 @@ def main():
         
         if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact"]:
             models_map = clinical_models_map
-        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a"]:
+        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017"]:
             models_map = bci_models_map
         else:
             models_map = {}
             parser.error(f"Invalid task specified. Choose from: {', '.join(tasks_map.keys())}")
         
-        if model_key not in models_map:
-            parser.error(f"Invalid model specified. Choose from: {', '.join(models_map.keys())}")
-        model_instance = models_map[model_key]
+        invalid_models = [model_key for model_key in model_keys if model_key not in models_map]
+        if invalid_models:
+            parser.error(
+                "Invalid model(s) specified: "
+                f"{', '.join(invalid_models)}. Choose from: {', '.join(models_map.keys())}"
+            )
 
-        benchmark([task_instance], [model_instance], args.seed, args.reps)
+        model_instances = [(model_key, models_map[model_key]) for model_key in model_keys]
+        benchmark([task_instance], model_instances, args.seed, args.reps, task_key=task_key)
 
 if __name__ == "__main__":
     main()

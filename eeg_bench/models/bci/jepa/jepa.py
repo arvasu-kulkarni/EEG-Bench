@@ -218,7 +218,7 @@ class MAEDecoder(nn.Module):
 # ============================================================
 
 class EEG_JEPA_MAE_Classifier(nn.Module):
-    def __init__(self, num_classes, checkpoint_path=None):
+    def __init__(self, num_classes, checkpoint_path=None, embedding_dim=None):
         super().__init__()
         
         # Always instantiate the model first
@@ -242,7 +242,13 @@ class EEG_JEPA_MAE_Classifier(nn.Module):
             else:
                 raise ValueError(f"Unexpected checkpoint type: {type(checkpoint)}")
         
-        self.final_layer = nn.Linear(256, num_classes)
+        classifier_input_dim = embedding_dim if embedding_dim is not None else 256
+        self.final_layer = nn.Sequential(
+            nn.Flatten(),
+            nn.RMSNorm(classifier_input_dim),
+            nn.Dropout(0.1),
+            nn.Linear(classifier_input_dim, num_classes),
+        )
 
     def forward(self, x, xyz):
         H = self.jepa_mae.encode(x, xyz)  # Get student representation
