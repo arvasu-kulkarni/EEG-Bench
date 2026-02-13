@@ -21,7 +21,7 @@ def n_unique_labels(task_name: str) -> int:
     else:
         raise ValueError("Invalid task name: ", task_name)
 
-def map_label(label: str, task_name: str) -> int:
+def map_label(label, task_name: str) -> int:
     """
     Map the label to a numerical value.
     Args:
@@ -30,41 +30,65 @@ def map_label(label: str, task_name: str) -> int:
     Returns:
         int: The mapped numerical value.
     """
-    if label is not None:
-        if task_name == "Left Hand vs Right Hand MI":
-            if label == "left_hand":
-                return 0
-            elif label == "right_hand":
-                return 1
-        elif task_name == "Right Hand vs Feet MI":
-            if label == "right_hand":
-                return 0
-            elif label == "feet":
-                return 1
-        elif task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
-            if label == "left_hand":
-                return 0
-            elif label == "right_hand":
-                return 1
-            elif label == "feet":
-                return 2
-            elif label == "tongue":
-                return 3
-        elif task_name == "Five Fingers MI":
-            if label == "thumb":
-                return 0
-            elif label == "index finger":
-                return 1
-            elif label == "middle finger":
-                return 2
-            elif label == "ring finger":
-                return 3
-            elif label == "little finger":
-                return 4
-        else:
-            raise ValueError("Invalid label: ", label)
-    else:
+    if label is None:
         raise ValueError("Label cannot be None")
+
+    if isinstance(label, (int, np.integer, float, np.floating)):
+        label_int = int(label)
+        if task_name == "Left Hand vs Right Hand MI":
+            if label_int in (0, 1):
+                return label_int
+            if label_int in (1, 2):
+                return label_int - 1
+        elif task_name == "Right Hand vs Feet MI":
+            if label_int in (0, 1):
+                return label_int
+            if label_int in (2, 3):
+                return label_int - 2
+        elif task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
+            if label_int in (0, 1, 2, 3):
+                return label_int
+            if label_int in (1, 2, 3, 4):
+                return label_int - 1
+        elif task_name == "Five Fingers MI":
+            if label_int in (0, 1, 2, 3, 4):
+                return label_int
+            if label_int in (1, 2, 3, 4, 5):
+                return label_int - 1
+        raise ValueError("Invalid numeric label: ", label)
+
+    if task_name == "Left Hand vs Right Hand MI":
+        if label == "left_hand":
+            return 0
+        if label == "right_hand":
+            return 1
+    elif task_name == "Right Hand vs Feet MI":
+        if label == "right_hand":
+            return 0
+        if label == "feet":
+            return 1
+    elif task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
+        if label == "left_hand":
+            return 0
+        if label == "right_hand":
+            return 1
+        if label == "feet":
+            return 2
+        if label == "tongue":
+            return 3
+    elif task_name == "Five Fingers MI":
+        if label == "thumb":
+            return 0
+        if label == "index finger":
+            return 1
+        if label == "middle finger":
+            return 2
+        if label == "ring finger":
+            return 3
+        if label == "little finger":
+            return 4
+    else:
+        raise ValueError("Invalid label: ", label)
         
 def reverse_map_label(label: int, task_name: str) -> str:
     """
@@ -98,7 +122,7 @@ def calc_class_weights(labels: List[np.ndarray], task_name: str) -> List[float]:
     all_labels = np.concatenate(labels)
 
     # Map labels to integers
-    all_labels = np.array([map_label(label, task_name) for label in all_labels])
+    all_labels = np.array([map_label(label, task_name) for label in all_labels], dtype=np.int64)
     
     # Count the occurrences of each class
     class_counts = np.bincount(all_labels)
