@@ -31,7 +31,7 @@ class RightHandvFeetMITask(AbstractBCITask):
                 Zhou2016MDataset,
                 Faller2012MDataset,
                 Scherer2015MDataset,
-                Kaya2018Dataset,
+                #Kaya2018Dataset,
             ],
             subjects_split={
                 Weibo2014MDataset: {

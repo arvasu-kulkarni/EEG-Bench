@@ -27,7 +27,8 @@ from eeg_bench.tasks.bci import (
     cho2017,
     bcicompiv2a_4class,
     schirrmeister2017,
-    physionetmi
+    physionetmi,
+    zhou2016
 )
 from eeg_bench.models.clinical import (
     BrainfeaturesLDAModel as BrainfeaturesLDA,
@@ -56,43 +57,52 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-BCI_MODEL_TASK_EMBED_DIMS = {
+BCI_MODEL_DATASET_EMBED_DIMS = {
     "revebase": {
-        "bci42a": 45056,
-        "bci42b": 6144,
-        "weibo2014": 122880,
-        "cho2017": 98304,
-        "bci42a_4class": 45056,
-        "schirrmeister2017": 262144,
-        "physionetmi": 96768,
+        "BCICompIV2aMDataset": 45056,
+        "BCICompIV2bMDataset": 6144,
+        "Weibo2014MDataset": 122880,
+        "Cho2017MDataset": 98304,
+        "Schirrmeister2017MDataset": 262144,
+        "PhysionetMIMDataset": 96768,
+        "Zhou2016MDataset": 35840,
+        "Barachant2012MDataset": 24576,
+        "Faller2012MDataset": 33280,
+        "Scherer2015MDataset": 107520
     },
     "eegembed": {
-        "bci42a": 45056,
-        "bci42b": 6144,
-        "weibo2014": 122880,
-        "cho2017": 98304,
-        "bci42a_4class": 45056,
-        "schirrmeister2017": 147456,
-        "physionetmi": 98304,
+        "BCICompIV2aMDataset": 45056,
+        "BCICompIV2bMDataset": 6144,
+        "Weibo2014MDataset": 122880,
+        "Cho2017MDataset": 98304,
+        "Schirrmeister2017MDataset": 147456,
+        "PhysionetMIMDataset": 98304,
+        "Zhou2016MDataset": 35840,
+        "Barachant2012MDataset": 24576,
+        "Faller2012MDataset": 33280,
+        "Scherer2015MDataset": 107520
     },
     "jepa": {
-        "bci42a": 256,
-        "bci42b": 256,
-        "weibo2014": 256,
-        "cho2017": 256,
-        "bci42a_4class": 256,
-        "schirrmeister2017": 256,
-        "physionetmi": 256,
+        "BCICompIV2aMDataset": 256,
+        "BCICompIV2bMDataset": 256,
+        "Weibo2014MDataset": 256,
+        "Cho2017MDataset": 256,
+        "Schirrmeister2017MDataset": 256,
+        "PhysionetMIMDataset": 256,
+        "Zhou2016MDataset": 256,
+        "Barachant2012MDataset": 256,
+        "Faller2012MDataset": 256,
+        "Scherer2015MDataset": 256
     },
 }
 
 
-def _get_model_kwargs(model_key, task_key, num_classes=None):
+def _get_model_kwargs(model_key, dataset_key, num_classes=None):
     kwargs = {}
-    if model_key in BCI_MODEL_TASK_EMBED_DIMS:
-        task_dims = BCI_MODEL_TASK_EMBED_DIMS[model_key]
-        if task_key in task_dims:
-            kwargs["embedding_dim"] = task_dims[task_key]
+    if model_key in BCI_MODEL_DATASET_EMBED_DIMS:
+        dataset_dims = BCI_MODEL_DATASET_EMBED_DIMS[model_key]
+        if dataset_key in dataset_dims:
+            kwargs["embedding_dim"] = dataset_dims[dataset_key]
     if num_classes is not None and model_key in {"revebase", "eegembed", "jepa"}:
         kwargs["num_classes"] = num_classes
     return kwargs
@@ -106,6 +116,15 @@ def benchmark(tasks, models, seed, reps, task_key=None):
 
         metrics = task.get_metrics()
         dataset_names = [m["name"] for m in meta_train]
+        dataset_class_names = [ds.__name__ for ds in task.datasets]
+        dataset_key = dataset_class_names[0] if dataset_class_names else None
+        if dataset_key and len(set(dataset_class_names)) > 1:
+            logger.warning(
+                "Multiple datasets detected for task '%s': %s. Using '%s' for embedding_dim.",
+                task.name,
+                ", ".join(sorted(set(dataset_class_names))),
+                dataset_class_names[0],
+            )
         models_names = []
         results = []
         y_trues = []
@@ -117,7 +136,7 @@ def benchmark(tasks, models, seed, reps, task_key=None):
             for i in range(reps):
                 print(f"Repetition {i+1}/{reps} with seed {seed + i}")
                 set_seed(seed + i)  # set seed for reproducibility
-                model_kwargs = _get_model_kwargs(model_key, task_key, num_classes=num_classes)
+                model_kwargs = _get_model_kwargs(model_key, dataset_key, num_classes=num_classes)
                 if is_multilabel_task:
                     num_classes = len(task.clinical_classes) + 1
                     model = model_class(
@@ -206,7 +225,8 @@ def main():
         "cho2017": cho2017,
         "bci42a_4class": bcicompiv2a_4class,
         "schirrmeister2017": schirrmeister2017,
-        "physionetmi": physionetmi
+        "physionetmi": physionetmi,
+        "zhou2016": zhou2016
     }
 
     # Mapping command-line strings to model classes
@@ -255,7 +275,7 @@ def main():
         
         if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact"]:
             models_map = clinical_models_map
-        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017", "bci42a_4class", "schirrmeister2017", "physionetmi"]:
+        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017", "bci42a_4class", "schirrmeister2017", "physionetmi", "zhou2016"]:
             models_map = bci_models_map
         else:
             models_map = {}

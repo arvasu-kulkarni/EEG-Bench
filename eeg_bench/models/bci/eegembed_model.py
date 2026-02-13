@@ -134,6 +134,8 @@ class EEGEmbedModel(AbstractModel):
         datasets = []
         loaders = []
         for X_, y_, meta_ in zip(cast(List[np.ndarray], X), cast(List[np.ndarray], y), meta):
+            if X_.ndim != 3 or X_.size == 0:
+                continue
             data, pos = self._select_channels_and_pos(X_, meta_["channel_names"])
             data = self._resample(data, meta_)
             data = self.normalize(data)
@@ -181,6 +183,8 @@ class EEGEmbedModel(AbstractModel):
 
         predictions = []
         for X_, meta_ in zip(cast(List[np.ndarray], X), meta):
+            if X_.ndim != 3 or X_.size == 0:
+                continue
             data, pos = self._select_channels_and_pos(X_, meta_["channel_names"])
             data = self._resample(data, meta_)
             data = self.normalize(data)

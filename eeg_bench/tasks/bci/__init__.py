@@ -10,3 +10,4 @@ from .cho2017 import cho2017
 from .bci_iv_2a_4class import bcicompiv2a_4class
 from .schirrmeister2017 import schirrmeister2017
 from .physionetmi import physionetmi
+from .zhou2016 import zhou2016
