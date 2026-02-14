@@ -6,3 +6,4 @@ from .neurogpt_model import NeuroGPTModel
 from .revebase_model import ReveBaseModel
 from .eegembed_model import EEGEmbedModel
 from .jepa_model import JEPAModel
+from .hybridjepa_model import HybridJEPAModel

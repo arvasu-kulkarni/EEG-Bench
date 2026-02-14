@@ -4,6 +4,7 @@ from tqdm import tqdm
 from eeg_bench.enums.split import Split
 from eeg_bench.models.bci.eegembed_model import EEGEmbedModel
 from eeg_bench.models.bci.jepa_model import JEPAModel
+from eeg_bench.models.bci.hybridjepa_model import HybridJEPAModel
 from eeg_bench.tasks.clinical import (
     AbnormalClinicalTask,
     SchizophreniaClinicalTask,
@@ -94,6 +95,18 @@ BCI_MODEL_DATASET_EMBED_DIMS = {
         "Faller2012MDataset": 256,
         "Scherer2015MDataset": 256
     },
+    "hybridjepa": {
+        "BCICompIV2aMDataset": 45056,
+        "BCICompIV2bMDataset": 6144,
+        "Weibo2014MDataset": 122880,
+        "Cho2017MDataset": 98304,
+        "Schirrmeister2017MDataset": 147456,
+        "PhysionetMIMDataset": 98304,
+        "Zhou2016MDataset": 35840,
+        "Barachant2012MDataset": 24576,
+        "Faller2012MDataset": 33280,
+        "Scherer2015MDataset": 107520
+    }
 }
 
 
@@ -102,6 +115,7 @@ def _get_model_kwargs(model_key, dataset_key, num_classes=None):
     if model_key in BCI_MODEL_DATASET_EMBED_DIMS:
         dataset_dims = BCI_MODEL_DATASET_EMBED_DIMS[model_key]
         if dataset_key in dataset_dims:
+            print(f"Using embedding_dim={dataset_dims[dataset_key]} for model '{model_key}' and dataset '{dataset_key}'")
             kwargs["embedding_dim"] = dataset_dims[dataset_key]
     if num_classes is not None and model_key in {"revebase", "eegembed", "jepa"}:
         kwargs["num_classes"] = num_classes
@@ -245,7 +259,8 @@ def main():
         "neurogpt": NeuroGPTBci,
         "revebase": ReveBaseBci,
         "eegembed": EEGEmbedModel,
-        "jepa": JEPAModel
+        "jepa": JEPAModel,
+        "hybridjepa": HybridJEPAModel
     }
 
     if args.all:

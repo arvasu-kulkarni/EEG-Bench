@@ -304,17 +304,17 @@ class EEG_JEPA_MAE(nn.Module):
         tokens_pos = tokens + pos_emb
 
         # 2. Masking
-        mask = sample_block_mask(B, C, P, x.device)
+        # mask = sample_block_mask(B, C, P, x.device)
 
         # 3. Student Input Construction
         student_in = tokens_pos.clone()
         # Broadcast mask token and add positional embedding at masked locations
-        mask_token_with_pos = self.student_mask_token + pos_emb
-        batch_mask_token_with_pos = mask_token_with_pos.expand(B, -1, -1)
-        student_in[mask] = batch_mask_token_with_pos[mask]
+        # mask_token_with_pos = self.student_mask_token + pos_emb
+        # batch_mask_token_with_pos = mask_token_with_pos.expand(B, -1, -1)
+        # student_in[mask] = batch_mask_token_with_pos[mask]
 
         # 4. Forward Passes
-        H = self.student(student_in)
+        H = self.teacher(student_in)
 
         return H
 
