@@ -273,6 +273,26 @@ def process_neurogpt(raw):
 
     return np.array(trial_data)
 
+def process_reve_eegembed_raw(raw, target_channels, target_freq=200):
+    if target_channels:
+        raw = raw.reorder_channels(target_channels)
+    signals = raw.get_data(units="uV")
+    sfreq = raw.info["sfreq"]
+    if sfreq != target_freq:
+        signals = resample(signals.astype(np.float32), sfreq, target_freq, axis=1, filter='kaiser_best')
+    signals = signals.astype(np.float32)
+    mean = signals.mean(axis=1, keepdims=True)
+    std = signals.std(axis=1, keepdims=True) + 1e-6
+    return (signals - mean) / std
+
+def process_reve_eegembed_signals(signals, sfreq, target_freq=200):
+    if sfreq != target_freq:
+        signals = resample(signals.astype(np.float32), sfreq, target_freq, axis=1, filter='kaiser_best')
+    signals = signals.astype(np.float32)
+    mean = signals.mean(axis=1, keepdims=True)
+    std = signals.std(axis=1, keepdims=True) + 1e-6
+    return (signals - mean) / std
+
 def process_bendr(raw):
     # Limit the raw data to a maximum of 30 minutes
     max_duration_s = 30 * 60  # 30 minutes in seconds
@@ -316,13 +336,23 @@ def process_one_abnormal(parameters, output_queue):
     if label is not None:
         label = map_label(label)
 
+    out_channels = None
+    out_freq = raw.info['sfreq']
     if model_name == "LaBraMModel":
         t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
         t_channels = list(set(standard_1020).intersection(set(t_channels)))
         ch_name_pattern="EEG {}-REF"
         chs = [ch_name_pattern.format(ch) for ch in t_channels]
         signals = process_labram(raw, chs)
-        assert raw.info['sfreq'] == 200
+        out_freq = raw.info['sfreq']
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+        t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
+        t_channels = list(set(standard_1020).intersection(set(t_channels)))
+        ch_name_pattern = "EEG {}-REF"
+        chs = [ch_name_pattern.format(ch) for ch in t_channels]
+        signals = process_reve_eegembed_raw(raw, chs)
+        out_channels = t_channels
+        out_freq = 200
     elif model_name == "NeuroGPTModel":
         signals = process_neurogpt(raw)
         assert raw.info['sfreq'] == 250
@@ -334,7 +364,10 @@ def process_one_abnormal(parameters, output_queue):
 
     # Send the processed data to the writer process
     time.sleep(1)  # Give the writer process some time to start
-    output_queue.put((idx, signals, label, chunk_len_s, raw.info['sfreq']))
+    if out_channels is not None:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq, out_channels))
+    else:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq))
     logging.info(f"Processed recording {idx} with label {label}")
     return
 
@@ -348,6 +381,8 @@ def process_one_epilepsy(parameters, output_queue):
     if label is not None:
         label = map_label(label)
 
+    out_channels = None
+    out_freq = raw.info['sfreq']
     if model_name == "LaBraMModel":
         t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
         t_channels = list(set(standard_1020).intersection(set(t_channels)))
@@ -357,6 +392,17 @@ def process_one_epilepsy(parameters, output_queue):
             ch_name_pattern="EEG {}-REF"
         chs = [ch_name_pattern.format(ch) for ch in t_channels]
         signals = process_labram(raw, chs)
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+        t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
+        t_channels = list(set(standard_1020).intersection(set(t_channels)))
+        if "le" in montage:
+            ch_name_pattern = "EEG {}-LE"
+        else:
+            ch_name_pattern = "EEG {}-REF"
+        chs = [ch_name_pattern.format(ch) for ch in t_channels]
+        signals = process_reve_eegembed_raw(raw, chs)
+        out_channels = t_channels
+        out_freq = 200
     elif model_name == "NeuroGPTModel":
         signals = process_neurogpt(raw)
     elif model_name == "BENDRModel":
@@ -366,7 +412,10 @@ def process_one_epilepsy(parameters, output_queue):
 
     # Send the processed data to the writer process
     time.sleep(1)  # Give the writer process some time to start
-    output_queue.put((idx, signals, label, chunk_len_s, raw.info['sfreq']))
+    if out_channels is not None:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq, out_channels))
+    else:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq))
     logging.info(f"Processed recording {idx} with label {label}")
     return
 
@@ -390,6 +439,13 @@ def process_one_multilabel(parameters, output_queue):
         raw = process_filter(raw, 200)
         signals = raw.get_data(units="uV")
         out_channels = list(raw.ch_names)
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+        t_channels = sorted(list(set(standard_1020).intersection(set(raw.ch_names))))
+        if len(t_channels) == 0:
+            print("WARN: No channels from this sample match with those known to ReveBase/EEGEmbed. Keeping original channels")
+            t_channels = list(raw.ch_names)
+        signals = process_reve_eegembed_raw(raw, t_channels)
+        out_channels = list(t_channels)
     elif model_name == "NeuroGPTModel":
         raw = process_filter(raw, 250)
         signals = raw.get_data(units="uV")
@@ -475,6 +531,7 @@ def process_one_cli_unm(parameters, output_queue):
     if label is not None:
         label = map_label(label)
 
+    out_channels = None
     if model_name == "LaBraMModel":
         ch_names = [ch.upper() for ch in o_channels]
         #target_channels = list(set(ch_names).intersection(set([ch.upper() for ch in standard_1020])))
@@ -533,6 +590,22 @@ def process_one_cli_unm(parameters, output_queue):
         # resample data
         signals = resample(signals.astype(np.float32), sfreq, 250, axis=1, filter='kaiser_best')
         out_freq = 250
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+        ch_names = [ch.upper() for ch in o_channels]
+        t_channels = get_channels(task_name)
+        t_channels = [c.upper() for c in t_channels]
+        target_channels = list(set(ch_names).intersection(set(t_channels)))
+        target_channels = sorted(target_channels)
+        if target_channels:
+            signals = signals[[ch_names.index(ch) for ch in target_channels], :]
+        out_channels = target_channels
+
+        max_duration_s = 30 * 60
+        if signals.shape[1] > max_duration_s * sfreq:
+            signals = signals[:, :max_duration_s * sfreq]
+
+        signals = process_reve_eegembed_signals(signals, sfreq, target_freq=200)
+        out_freq = 200
     elif model_name == "BENDRModel":
         reorder_channels = []
         new_ch_names = []
@@ -575,7 +648,10 @@ def process_one_cli_unm(parameters, output_queue):
         raise ValueError(f"Invalid model name: {model_name}")
 
     # Send the processed data to the writer process
-    output_queue.put((idx, signals, label, chunk_len_s, out_freq))
+    if out_channels is not None:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq, out_channels))
+    else:
+        output_queue.put((idx, signals, label, chunk_len_s, out_freq))
     logging.info(f"Processed recording {idx} with label {label}")
     return
 

@@ -129,6 +129,7 @@ def print_classification_results(
                 results.append(["Held-Out"] + list(zhou_metrics.values()))
         
         # Add per-dataset metrics
+        per_dataset_metrics = []
         for i, (this_y_test, this_y_pred) in enumerate(zip(y_test, y_pred)):
             if task_name in get_multilabel_tasks():
                 this_y_test = np.concatenate(this_y_test)
@@ -136,7 +137,15 @@ def print_classification_results(
                 dataset_metrics = calculate_metrics(this_y_test, this_y_pred, no_encoder=True)
             else:
                 dataset_metrics = calculate_metrics(this_y_test, this_y_pred)
+            per_dataset_metrics.append(dataset_metrics)
             results.append([f"{dataset_names[i]}"] + list(dataset_metrics.values()))
+
+        if len(per_dataset_metrics) > 1:
+            avg_metrics = {
+                metric: float(np.mean([m[metric] for m in per_dataset_metrics]))
+                for metric in per_dataset_metrics[0].keys()
+            }
+            results.append(["Dataset Average"] + list(avg_metrics.values()))
 
         # Create a DataFrame for tabular formatting
         metrics_table = pd.DataFrame(

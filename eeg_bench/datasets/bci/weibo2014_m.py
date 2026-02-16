@@ -84,6 +84,8 @@ class Weibo2014MDataset(BaseBCIDataset):
             paradigm = MotorImagery(n_classes=2, events=["left_hand", "right_hand"])
         elif set(self.target_classes) == set([BCIClasses.RIGHT_HAND_MI, BCIClasses.FEET_MI]):
             paradigm = MotorImagery(n_classes=2, events=["right_hand", "feet"])
+        elif set(self.target_classes) == set([BCIClasses.LEFT_HAND_MI, BCIClasses.RIGHT_HAND_MI, BCIClasses.FEET_MI, BCIClasses.BOTH_HANDS_MI]):
+            paradigm = MotorImagery(n_classes=4, events=["left_hand", "right_hand", "feet", "hands"])
         else:
             raise ValueError("Invalid target classes")
 

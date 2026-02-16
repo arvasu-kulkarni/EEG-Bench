@@ -22,9 +22,15 @@ class BCIDataset(EEGDataset):
         elif task_name == "Right Hand vs Feet MI":
             self.labels_string2int = {'right_hand': 0, 'feet': 1}
             self.labels_int2string = {0: 'right_hand', 1: 'feet'}
+        elif task_name == "Left Hand vs Right Hand vs Feet MI":
+            self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2}
+            self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet'}
         elif task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
             self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2, 'tongue':3 }
             self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet', 3: 'tongue'}
+        elif task_name == "Left Hand vs Right Hand vs Feet vs Hands MI":
+            self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2, 'hands': 3}
+            self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet', 3: 'hands'}
         else:
             raise ValueError("Invalid task name")
 
@@ -109,9 +115,15 @@ class MotorImageryDataset(EEGDataset):
         elif task_name == "Right Hand vs Feet MI":
             self.labels_string2int = {'right_hand': 0, 'feet': 1}
             self.labels_int2string = {0: 'right_hand', 1: 'feet'}
+        elif task_name == "Left Hand vs Right Hand vs Feet MI":
+            self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2}
+            self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet'}
         elif task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
             self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2, 'tongue':3 }
             self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet', 3: 'tongue'}
+        elif task_name == "Left Hand vs Right Hand vs Feet vs Hands MI":
+            self.labels_string2int = {'left_hand': 0, 'right_hand': 1, 'feet': 2, 'hands': 3}
+            self.labels_int2string = {0: 'left_hand', 1: 'right_hand', 2: 'feet', 3: 'hands'}
         else:
             raise ValueError("Invalid task name")
         self.task_name = task_name
@@ -170,7 +182,11 @@ class MotorImageryDataset(EEGDataset):
                         label = 1
                     elif label == 1:
                         label = 0
+                elif self.task_name == "Left Hand vs Right Hand vs Feet MI":
+                    pass
                 elif self.task_name == "Left Hand vs Right Hand vs Feet vs Tongue MI":
+                    pass
+                elif self.task_name == "Left Hand vs Right Hand vs Feet vs Hands MI":
                     pass
 
                 classes.append(label)

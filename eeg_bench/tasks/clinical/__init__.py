@@ -9,3 +9,5 @@ from .seizure_clinical_task import SeizureClinicalTask
 from .sleep_stages_clinical_task import SleepStagesClinicalTask
 from .multiclass_artifact_clinical_task import ArtifactMulticlassClinicalTask
 from .binary_artifact_clinical_task import ArtifactBinaryClinicalTask
+from .cavanagh2018a_base import cavanagh2018a
+from .cavanagh2018b import cavanagh2018b

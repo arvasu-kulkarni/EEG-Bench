@@ -64,7 +64,7 @@ class PhysionetMIMDataset(BaseBCIDataset):
 
     def load_data(self) -> None:
         physionetmi = PhysionetMI()
-        if self.target_classes is None:
+        if len(self.target_classes) == 0:
             logging.warning("target_classes is None, loading all classes...")
             paradigm = MotorImagery(
                 n_classes=4, events=["left_hand", "right_hand", "feet", "hands"]
@@ -75,6 +75,8 @@ class PhysionetMIMDataset(BaseBCIDataset):
             paradigm = MotorImagery(n_classes=2, events=["left_hand", "right_hand"])
         elif set(self.target_classes) == set([BCIClasses.RIGHT_HAND_MI, BCIClasses.FEET_MI]):
             paradigm = MotorImagery(n_classes=2, events=["right_hand", "feet"])
+        elif set(self.target_classes) == set([BCIClasses.LEFT_HAND_MI, BCIClasses.RIGHT_HAND_MI, BCIClasses.FEET_MI, BCIClasses.BOTH_HANDS_MI]):
+            paradigm = MotorImagery(n_classes=4, events=["left_hand", "right_hand", "feet", "hands"])
         else:
             raise ValueError("Invalid target classes")
 

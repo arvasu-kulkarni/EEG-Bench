@@ -45,7 +45,10 @@ class LaBraMBCIModel(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
         
-        checkpoint = torch.load(check_and_download_pretrained_model())
+        checkpoint_path = check_and_download_pretrained_model()
+        # Allowlist numpy scalar used in the weights file for PyTorch 2.6+ safe loading.
+        torch.serialization.add_safe_globals([np.core.multiarray.scalar])
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         new_checkpoint = {}
         for k,v in checkpoint['model'].items():
             if k.startswith('student.'):

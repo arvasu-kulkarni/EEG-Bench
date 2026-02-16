@@ -16,6 +16,8 @@ from eeg_bench.tasks.clinical import (
     ArtifactBinaryClinicalTask,
     ArtifactMulticlassClinicalTask,
     SleepStagesClinicalTask,
+    cavanagh2018a,
+    cavanagh2018b
 )
 from eeg_bench.tasks.bci import (
     LeftHandvRightHandMITask,
@@ -29,7 +31,13 @@ from eeg_bench.tasks.bci import (
     bcicompiv2a_4class,
     schirrmeister2017,
     physionetmi,
-    zhou2016
+    zhou2016,
+    barachant2012_base,
+    faller2012_base,
+    PhysionetMIBaseTask,
+    scherer2015,
+    schirrmeister2017_base,
+    weibo2014_base
 )
 from eeg_bench.models.clinical import (
     BrainfeaturesLDAModel as BrainfeaturesLDA,
@@ -37,6 +45,8 @@ from eeg_bench.models.clinical import (
     LaBraMModel as LaBraMClinical,
     BENDRModel as BENDRClinical,
     NeuroGPTModel as NeuroGPTClinical,
+    ReveBaseModel as ReveBaseClinical,
+    EEGEmbedModel as EEGEmbedClinical,
 )
 from eeg_bench.models.bci import (
     CSPLDAModel as CSPLDA,
@@ -131,55 +141,95 @@ def benchmark(tasks, models, seed, reps, task_key=None):
         metrics = task.get_metrics()
         dataset_names = [m["name"] for m in meta_train]
         dataset_class_names = [ds.__name__ for ds in task.datasets]
-        dataset_key = dataset_class_names[0] if dataset_class_names else None
-        if dataset_key and len(set(dataset_class_names)) > 1:
-            logger.warning(
-                "Multiple datasets detected for task '%s': %s. Using '%s' for embedding_dim.",
-                task.name,
-                ", ".join(sorted(set(dataset_class_names))),
-                dataset_class_names[0],
-            )
-        models_names = []
-        results = []
-        y_trues = []
-        y_trains = []
         is_multilabel_task = task.name in get_multilabel_tasks()
         num_classes = len(task.classes) if hasattr(task, "classes") else None
-        for model_key, model_class in models:
-            print(f'running {model_key} on {task.name}')
-            for i in range(reps):
-                print(f"Repetition {i+1}/{reps} with seed {seed + i}")
-                set_seed(seed + i)  # set seed for reproducibility
-                model_kwargs = _get_model_kwargs(model_key, dataset_key, num_classes=num_classes)
-                if is_multilabel_task:
-                    num_classes = len(task.clinical_classes) + 1
-                    model = model_class(
-                        num_classes=num_classes,
-                        num_labels_per_chunk=task.num_labels_per_chunk,
-                        **model_kwargs,
+        for dataset_index, dataset_name in enumerate(dataset_names):
+            models_names = []
+            results = []
+            y_trues = []
+            y_trains = []
+            dataset_key = (
+                dataset_class_names[dataset_index]
+                if dataset_index < len(dataset_class_names)
+                else None
+            )
+            for model_key, model_class in models:
+                print(f"running {model_key} on {task.name} ({dataset_name})")
+                for i in range(reps):
+                    print(f"Repetition {i+1}/{reps} with seed {seed + i}")
+                    set_seed(seed + i)  # set seed for reproducibility
+                    model_kwargs = _get_model_kwargs(
+                        model_key, dataset_key, num_classes=num_classes
                     )
-                    this_y_train = make_multilabels(X_train, y_train, task.event_map, task.chunk_len_s, task.num_labels_per_chunk, model.name)
-                    this_y_test = make_multilabels(X_test, y_test, task.event_map, task.chunk_len_s, task.num_labels_per_chunk, model.name)
-                else:
-                    model = model_class(**model_kwargs)
-                    this_y_train = y_train
-                    this_y_test = y_test
+                    if is_multilabel_task:
+                        this_num_classes = len(task.clinical_classes) + 1
+                        model = model_class(
+                            num_classes=this_num_classes,
+                            num_labels_per_chunk=task.num_labels_per_chunk,
+                            **model_kwargs,
+                        )
+                        this_y_train = make_multilabels(
+                            [X_train[dataset_index]],
+                            [y_train[dataset_index]],
+                            task.event_map,
+                            task.chunk_len_s,
+                            task.num_labels_per_chunk,
+                            model.name,
+                        )
+                        this_y_test = make_multilabels(
+                            [X_test[dataset_index]],
+                            [y_test[dataset_index]],
+                            task.event_map,
+                            task.chunk_len_s,
+                            task.num_labels_per_chunk,
+                            model.name,
+                        )
+                    else:
+                        model = model_class(**model_kwargs)
+                        this_y_train = [y_train[dataset_index]]
+                        this_y_test = [y_test[dataset_index]]
 
-                model.fit(X_train, this_y_train, meta_train)
-                y_pred = []
-                for x, m in zip(X_test, meta_test):
-                    y_pred.append(model.predict([x], [m]))
+                    model.fit(
+                        [X_train[dataset_index]],
+                        [this_y_train[0]],
+                        [meta_train[dataset_index]],
+                    )
+                    y_pred = model.predict(
+                        [X_test[dataset_index]],
+                        [meta_test[dataset_index]],
+                    )
 
-                models_names.append(str(model))
-                results.append(y_pred)
-                y_trues.append(this_y_test)
-                y_trains.append(this_y_train)
+                    models_names.append(str(model))
+                    results.append([y_pred])
+                    y_trues.append(this_y_test)
+                    y_trains.append(this_y_train)
 
-        save_results(y_trains, y_trues, models_names, results, dataset_names, task.name)
-        print_classification_results(
-            y_trains, y_trues, models_names, results, dataset_names, task.name, metrics
-        )
-        generate_classification_plots(y_trains, y_trues, models_names, results, dataset_names, task.name, metrics)
+            save_results(
+                y_trains,
+                y_trues,
+                models_names,
+                results,
+                [dataset_name],
+                task.name,
+            )
+            print_classification_results(
+                y_trains,
+                y_trues,
+                models_names,
+                results,
+                [dataset_name],
+                task.name,
+                metrics,
+            )
+            generate_classification_plots(
+                y_trains,
+                y_trues,
+                models_names,
+                results,
+                [dataset_name],
+                task.name,
+                metrics,
+            )
 
 
 def main():
@@ -240,7 +290,15 @@ def main():
         "bci42a_4class": bcicompiv2a_4class,
         "schirrmeister2017": schirrmeister2017,
         "physionetmi": physionetmi,
-        "zhou2016": zhou2016
+        "zhou2016": zhou2016,
+        "barachant2012": barachant2012_base,
+        "faller2012": faller2012_base,
+        "physionetmi_base": PhysionetMIBaseTask,
+        "scherer2015": scherer2015,
+        "schirrmeister2017_base": schirrmeister2017_base,
+        "weibo2014_base": weibo2014_base,
+        "cavanagh2018a": cavanagh2018a,
+        "cavanagh2018b": cavanagh2018b,
     }
 
     # Mapping command-line strings to model classes
@@ -250,6 +308,10 @@ def main():
         "labram": LaBraMClinical,
         "bendr": BENDRClinical,
         "neurogpt": NeuroGPTClinical,
+        "revebase": ReveBaseClinical,
+        "eegembed": EEGEmbedClinical,
+        "jepa": JEPAModel,
+        "hybridjepa": HybridJEPAModel
     }
     bci_models_map = {
         "lda": CSPLDA,
@@ -288,9 +350,9 @@ def main():
             parser.error(f"Invalid task specified. Choose from: {', '.join(tasks_map.keys())}")
         task_instance = tasks_map[task_key]()
         
-        if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact"]:
+        if task_key in ["parkinsons", "schizophrenia", "mtbi", "ocd", "epilepsy", "abnormal", "sleep_stages", "seizure", "binary_artifact", "multiclass_artifact", "cavanagh2018a", "cavanagh2018b"]:
             models_map = clinical_models_map
-        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017", "bci42a_4class", "schirrmeister2017", "physionetmi", "zhou2016"]:
+        elif task_key in ["left_right", "right_feet", "left_right_feet_tongue", "5_fingers", "bci42a", "bci42b", "weibo2014", "cho2017", "bci42a_4class", "schirrmeister2017", "physionetmi", "zhou2016", "barachant2012", "faller2012", "physionetmi_base", "scherer2015", "schirrmeister2017_base", "weibo2014_base"]:
             models_map = bci_models_map
         else:
             models_map = {}

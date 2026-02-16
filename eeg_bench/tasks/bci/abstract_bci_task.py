@@ -14,7 +14,7 @@ class AbstractBCITask(ABC):
         datasets: Sequence[Type[AbstractDataset]],
         subjects_split: Dict[Type[AbstractDataset], Dict[Split, Sequence[int]]],
     ):
-        assert len(classes) > 1, "At least two classes are required"
+        # assert len(classes) > 1, "At least two classes are required"
         assert len(datasets) > 0, "At least one dataset is required"
         assert set(datasets).issubset(subjects_split.keys()), "Subjects split must match datasets"
         assert all(

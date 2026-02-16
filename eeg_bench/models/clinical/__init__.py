@@ -3,3 +3,5 @@ from .brainfeatures_svm_model import BrainfeaturesSVMModel
 from .labram_model import LaBraMModel
 from .bendr_model import BENDRModel
 from .neurogpt_model import NeuroGPTModel
+from .revebase_model import ReveBaseModel
+from .eegembed_model import EEGEmbedModel

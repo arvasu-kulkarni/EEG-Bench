@@ -11,3 +11,9 @@ from .bci_iv_2a_4class import bcicompiv2a_4class
 from .schirrmeister2017 import schirrmeister2017
 from .physionetmi import physionetmi
 from .zhou2016 import zhou2016
+from .barachant2012_base import barachant2012_base
+from .faller2012_base import faller2012_base
+from .physionetmi_base import PhysionetMIBaseTask
+from .scherer2015_base import scherer2015
+from .schirrmeister2017_base import schirrmeister2017_base
+from .weibo2014_base import weibo2014_base
