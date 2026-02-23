@@ -7,3 +7,4 @@ from .revebase_model import ReveBaseModel
 from .eegembed_model import EEGEmbedModel
 from .jepa_model import JEPAModel
 from .hybridjepa_model import HybridJEPAModel
+from .ndxreve_model import NdxReveModel

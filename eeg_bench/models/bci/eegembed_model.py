@@ -3,12 +3,14 @@ from __future__ import annotations
 from eeg_bench.models.bci.revefiles.mat import MyReveClassifier
 
 
-from typing import Dict, Iterable, List, Optional, Tuple, cast
+from typing import Dict, List, Optional, Tuple, cast
 
 import mne
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -37,16 +39,127 @@ class EEGEmbedBaseDataset(Dataset):
             return x, y
         return x, y, self.pos
 
+
+class LoRAMultiheadAttention(nn.Module):
+    def __init__(self, base_attn: nn.MultiheadAttention, rank: int, alpha: float, dropout: float):
+        super().__init__()
+        if rank <= 0:
+            raise ValueError("LoRA rank must be > 0")
+        if not base_attn.batch_first:
+            raise ValueError("Only batch_first MultiheadAttention is supported for LoRA wrapper.")
+
+        self.base = base_attn
+        self.rank = int(rank)
+        self.scaling = float(alpha) / float(rank)
+        self.dropout = nn.Dropout(float(dropout)) if dropout > 0 else nn.Identity()
+
+        embed_dim = int(self.base.embed_dim)
+        base_weight = self.base.in_proj_weight
+        if base_weight is None:
+            raise RuntimeError("Expected packed in_proj_weight in MultiheadAttention.")
+        base_device = base_weight.device
+        base_dtype = base_weight.dtype
+
+        self.lora_A_q = nn.Parameter(torch.empty(self.rank, embed_dim, device=base_device, dtype=base_dtype))
+        self.lora_A_k = nn.Parameter(torch.empty(self.rank, embed_dim, device=base_device, dtype=base_dtype))
+        self.lora_A_v = nn.Parameter(torch.empty(self.rank, embed_dim, device=base_device, dtype=base_dtype))
+        self.lora_A_o = nn.Parameter(torch.empty(self.rank, embed_dim, device=base_device, dtype=base_dtype))
+
+        self.lora_B_q = nn.Parameter(torch.zeros(embed_dim, self.rank, device=base_device, dtype=base_dtype))
+        self.lora_B_k = nn.Parameter(torch.zeros(embed_dim, self.rank, device=base_device, dtype=base_dtype))
+        self.lora_B_v = nn.Parameter(torch.zeros(embed_dim, self.rank, device=base_device, dtype=base_dtype))
+        self.lora_B_o = nn.Parameter(torch.zeros(embed_dim, self.rank, device=base_device, dtype=base_dtype))
+
+        nn.init.kaiming_uniform_(self.lora_A_q, a=np.sqrt(5.0))
+        nn.init.kaiming_uniform_(self.lora_A_k, a=np.sqrt(5.0))
+        nn.init.kaiming_uniform_(self.lora_A_v, a=np.sqrt(5.0))
+        nn.init.kaiming_uniform_(self.lora_A_o, a=np.sqrt(5.0))
+
+    def _lora_proj(self, x: torch.Tensor, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return F.linear(F.linear(self.dropout(x), a), b) * self.scaling
+
+    def forward(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        key_padding_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = True,
+        attn_mask: Optional[torch.Tensor] = None,
+        average_attn_weights: bool = True,
+        is_causal: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        if key_padding_mask is not None or attn_mask is not None:
+            return self.base(
+                query,
+                key,
+                value,
+                key_padding_mask=key_padding_mask,
+                need_weights=need_weights,
+                attn_mask=attn_mask,
+                average_attn_weights=average_attn_weights,
+                is_causal=is_causal,
+            )
+
+        if self.base.in_proj_weight is None:
+            raise RuntimeError("Expected packed in_proj_weight in MultiheadAttention.")
+
+        wq, wk, wv = self.base.in_proj_weight.chunk(3, dim=0)
+        if self.base.in_proj_bias is not None:
+            bq, bk, bv = self.base.in_proj_bias.chunk(3, dim=0)
+        else:
+            bq = bk = bv = None
+
+        q = F.linear(query, wq, bq) + self._lora_proj(query, self.lora_A_q, self.lora_B_q)
+        k = F.linear(key, wk, bk) + self._lora_proj(key, self.lora_A_k, self.lora_B_k)
+        v = F.linear(value, wv, bv) + self._lora_proj(value, self.lora_A_v, self.lora_B_v)
+
+        bsz, q_len, _ = q.shape
+        k_len = k.shape[1]
+        heads = int(self.base.num_heads)
+        head_dim = int(self.base.head_dim)
+
+        q = q.view(bsz, q_len, heads, head_dim).transpose(1, 2)
+        k = k.view(bsz, k_len, heads, head_dim).transpose(1, 2)
+        v = v.view(bsz, k_len, heads, head_dim).transpose(1, 2)
+
+        attn_out = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=None,
+            dropout_p=float(self.base.dropout) if self.training else 0.0,
+            is_causal=is_causal,
+        )
+        attn_out = attn_out.transpose(1, 2).contiguous().view(bsz, q_len, heads * head_dim)
+
+        out = F.linear(attn_out, self.base.out_proj.weight, self.base.out_proj.bias)
+        out = out + self._lora_proj(attn_out, self.lora_A_o, self.lora_B_o)
+        return out, None
+
+
 class EEGEmbedModel(AbstractModel):
     def __init__(
         self,
-        checkpoint_path: str = "/share/sv7577-h200-41/checkpoints/mae_epoch_50.pt",
+        checkpoint_path: str = "/home/neurodx/arvasu/EEG-Bench/eeg_bench/models/manas1.pt",
         batch_size: int = 64,
         epochs: int = 10,
         lr: float = 2e-4,
         weight_decay: float = 2e-4,
         embedding_dim: Optional[int] = None,
         num_classes: int = 2,
+        linear_probe_epochs: int = 3,
+        warmup_epochs: int = 5,
+        warmup_start_factor: float = 0.1,
+        mixup_alpha: float = 0.4,
+        plateau_factor: float = 0.5,
+        plateau_patience: int = 3,
+        plateau_min_lr: float = 1e-6,
+        dropout: float = 0.1,
+        lora_rank: int = 0,
+        lora_alpha: float = 16.0,
+        lora_dropout: float = 0.05,
+        lora_only_finetune: bool = True,
     ):
         super().__init__("EEGEmbedModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -56,16 +169,96 @@ class EEGEmbedModel(AbstractModel):
         self.epochs = epochs
         self.lr = lr
         self.weight_decay = weight_decay
+        self.linear_probe_epochs = max(0, int(linear_probe_epochs))
+        self.warmup_epochs = max(0, int(warmup_epochs))
+        self.warmup_start_factor = float(warmup_start_factor)
+        self.mixup_alpha = float(mixup_alpha)
+        self.plateau_factor = float(plateau_factor)
+        self.plateau_patience = int(plateau_patience)
+        self.plateau_min_lr = float(plateau_min_lr)
+        self.dropout = float(dropout)
+        self.lora_rank = int(lora_rank)
+        self.lora_alpha = float(lora_alpha)
+        self.lora_dropout = float(lora_dropout)
+        self.lora_only_finetune = bool(lora_only_finetune)
+        self.lora_enabled = False
 
         dim = embedding_dim if embedding_dim is not None else 45056
         self.model = MyReveClassifier(
             checkpoint_path=checkpoint_path,
             num_classes=num_classes,
             flat_dim=dim,
+            dropout=self.dropout,
         ).to(self.device)
+        self._inject_lora_into_attention()
 
         self.task_name: Optional[str] = None
         self.num_classes: Optional[int] = None
+
+    def _set_two_step_trainable(self, train_backbone: bool) -> None:
+        for name, param in self.model.named_parameters():
+            if name.startswith("final_layer"):
+                param.requires_grad = True
+                continue
+
+            is_lora_param = "lora_" in name
+            if not train_backbone:
+                param.requires_grad = False
+            elif self.lora_enabled:
+                if self.lora_only_finetune:
+                    param.requires_grad = is_lora_param
+                else:
+                    param.requires_grad = True
+            else:
+                # Requested behavior: without LoRA, stage-2 keeps only final_layer trainable.
+                param.requires_grad = False
+
+    @staticmethod
+    def _set_module_by_name(root: nn.Module, module_name: str, new_module: nn.Module) -> None:
+        parts = module_name.split(".")
+        parent = root
+        for part in parts[:-1]:
+            parent = getattr(parent, part)
+        setattr(parent, parts[-1], new_module)
+
+    def _inject_lora_into_attention(self) -> None:
+        if self.lora_rank <= 0:
+            self.lora_enabled = False
+            return
+
+        attention_layers = 0
+        for module_name, module in list(self.model.named_modules()):
+            if isinstance(module, nn.MultiheadAttention):
+                wrapped = LoRAMultiheadAttention(
+                    module,
+                    rank=self.lora_rank,
+                    alpha=self.lora_alpha,
+                    dropout=self.lora_dropout,
+                )
+                self._set_module_by_name(self.model, module_name, wrapped)
+                attention_layers += 1
+
+        self.lora_enabled = attention_layers > 0
+        if self.lora_rank > 0 and not self.lora_enabled:
+            print("Warning: LoRA requested but no attention projections were found.")
+
+    def _apply_mixup(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        if self.mixup_alpha <= 0.0 or x.shape[0] < 2:
+            return x, y, y, 1.0
+        lam = float(np.random.beta(self.mixup_alpha, self.mixup_alpha))
+        index = torch.randperm(x.shape[0], device=x.device)
+        mixed_x = lam * x + (1.0 - lam) * x[index]
+        y_a, y_b = y, y[index]
+        return mixed_x, y_a, y_b, lam
+
+    def _set_warmup_lr(self, optimizer: torch.optim.Optimizer, epoch_idx: int) -> None:
+        if self.warmup_epochs <= 0 or epoch_idx >= self.warmup_epochs:
+            return
+        warmup_progress = float(epoch_idx + 1) / float(self.warmup_epochs)
+        lr_scale = self.warmup_start_factor + (1.0 - self.warmup_start_factor) * warmup_progress
+        lr_scale = min(1.0, max(0.0, lr_scale))
+        for group in optimizer.param_groups:
+            group["lr"] = self.lr * lr_scale
 
     def _make_positions(self, meta: Dict) -> torch.Tensor:
         # get position from montage assuming 1020
@@ -131,7 +324,6 @@ class EEGEmbedModel(AbstractModel):
         class_weights = torch.tensor(calc_class_weights(y, self.task_name), dtype=torch.float32).to(self.device)
         criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-        datasets = []
         loaders = []
         for X_, y_, meta_ in zip(cast(List[np.ndarray], X), cast(List[np.ndarray], y), meta):
             if X_.ndim != 3 or X_.size == 0:
@@ -141,7 +333,6 @@ class EEGEmbedModel(AbstractModel):
             data = self.normalize(data)
             labels = np.array([map_label(label, self.task_name) for label in y_], dtype=np.int64)
             dataset = EEGEmbedBaseDataset(data, labels, pos)
-            datasets.append(dataset)
             loaders.append(DataLoader(dataset, batch_size=self.batch_size, shuffle=True, num_workers=0))
 
         if not loaders:
@@ -161,18 +352,43 @@ class EEGEmbedModel(AbstractModel):
             lr=self.lr,
             weight_decay=self.weight_decay,
         )
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=self.plateau_factor,
+            patience=self.plateau_patience,
+            min_lr=self.plateau_min_lr,
+        )
+
+        self._set_two_step_trainable(train_backbone=False)
+        stage2_start = min(max(0, self.linear_probe_epochs), self.epochs)
 
         self.model.train()
-        for _ in range(self.epochs):
+        for epoch in range(self.epochs):
+            if epoch == stage2_start:
+                self._set_two_step_trainable(train_backbone=True)
+            self._set_warmup_lr(optimizer, epoch)
+
+            epoch_loss_sum = 0.0
+            epoch_batches = 0
             for loader in loaders:
                 for xb, yb, posb in tqdm(loader):
                     xb = xb.to(self.device)
-                    yb = yb.to(self.device)
+                    yb = yb.to(self.device).long()
+                    xb, y_a, y_b, lam = self._apply_mixup(xb, yb)
                     optimizer.zero_grad()
                     logits = self._forward(xb, posb)
-                    loss = criterion(logits, yb)
+                    if lam < 1.0:
+                        loss = lam * criterion(logits, y_a) + (1.0 - lam) * criterion(logits, y_b)
+                    else:
+                        loss = criterion(logits, y_a)
                     loss.backward()
                     optimizer.step()
+                    epoch_loss_sum += float(loss.detach().item())
+                    epoch_batches += 1
+
+            if epoch >= self.warmup_epochs and epoch_batches > 0:
+                scheduler.step(epoch_loss_sum / float(epoch_batches))
 
     @torch.no_grad()
     def predict(self, X: List[np.ndarray], meta: List[Dict]) -> np.ndarray:

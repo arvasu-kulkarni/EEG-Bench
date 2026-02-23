@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from tqdm import tqdm
 from eeg_bench.enums.split import Split
 from eeg_bench.models.bci.eegembed_model import EEGEmbedModel
@@ -47,6 +48,7 @@ from eeg_bench.models.clinical import (
     NeuroGPTModel as NeuroGPTClinical,
     ReveBaseModel as ReveBaseClinical,
     EEGEmbedModel as EEGEmbedClinical,
+    NdxReveModel as NdxReveClinical,
 )
 from eeg_bench.models.bci import (
     CSPLDAModel as CSPLDA,
@@ -55,6 +57,7 @@ from eeg_bench.models.bci import (
     BENDRModel as BENDRBci,
     NeuroGPTModel as NeuroGPTBci,
     ReveBaseModel as ReveBaseBci,
+    NdxReveModel as NdxReveBci,
 
 )
 from eeg_bench.utils.evaluate_and_plot import print_classification_results, generate_classification_plots
@@ -127,12 +130,11 @@ def _get_model_kwargs(model_key, dataset_key, num_classes=None):
         if dataset_key in dataset_dims:
             print(f"Using embedding_dim={dataset_dims[dataset_key]} for model '{model_key}' and dataset '{dataset_key}'")
             kwargs["embedding_dim"] = dataset_dims[dataset_key]
-    if num_classes is not None and model_key in {"revebase", "eegembed", "jepa"}:
+    if num_classes is not None and model_key in {"revebase", "eegembed", "jepa", "ndxreve"}:
         kwargs["num_classes"] = num_classes
     return kwargs
 
-
-def benchmark(tasks, models, seed, reps, task_key=None):
+def benchmark(tasks, models, seed, reps, task_key=None, model_runtime_kwargs_map=None):
     for task in tasks:
         logger.info(f"Running benchmark for task {task}")
         X_train, y_train, meta_train = task.get_data(Split.TRAIN)
@@ -161,6 +163,8 @@ def benchmark(tasks, models, seed, reps, task_key=None):
                     model_kwargs = _get_model_kwargs(
                         model_key, dataset_key, num_classes=num_classes
                     )
+                    if model_runtime_kwargs_map is not None and model_key in model_runtime_kwargs_map:
+                        model_kwargs.update(model_runtime_kwargs_map[model_key])
                     if is_multilabel_task:
                         this_num_classes = len(task.clinical_classes) + 1
                         model = model_class(
@@ -245,7 +249,19 @@ def main():
     parser.add_argument(
         "--model",
         type=str,
-        help="Model(s) to use. Comma-separated. Options: lda, svm, labram, bendr, neurogpt, revebase"
+        help="Model(s) to use. Comma-separated. Options: lda, svm, labram, bendr, neurogpt, revebase, ndxreve"
+    )
+    parser.add_argument(
+        "--ndx-checkpoint",
+        type=str,
+        default=None,
+        help="Path to local ndx-pipeline checkpoint (.pt/.pth), used when --model includes ndxreve"
+    )
+    parser.add_argument(
+        "--ndx-model-py",
+        type=str,
+        default="/home/neurodx/mahir/ndx-pipeline/model.py",
+        help="Path to ndx-pipeline model.py containing class MAE, used when --model includes ndxreve"
     )
     parser.add_argument(
         "--seed",
@@ -310,6 +326,7 @@ def main():
         "neurogpt": NeuroGPTClinical,
         "revebase": ReveBaseClinical,
         "eegembed": EEGEmbedClinical,
+        "ndxreve": NdxReveClinical,
         "jepa": JEPAModel,
         "hybridjepa": HybridJEPAModel
     }
@@ -320,10 +337,22 @@ def main():
         "bendr": BENDRBci,
         "neurogpt": NeuroGPTBci,
         "revebase": ReveBaseBci,
+        "ndxreve": NdxReveBci,
         "eegembed": EEGEmbedModel,
         "jepa": JEPAModel,
         "hybridjepa": HybridJEPAModel
     }
+
+    model_runtime_kwargs_map = {}
+    ndx_runtime_kwargs = {"ndx_model_py_path": args.ndx_model_py}
+    if args.ndx_checkpoint is not None:
+        ndx_runtime_kwargs["checkpoint_path"] = args.ndx_checkpoint
+    model_runtime_kwargs_map["ndxreve"] = ndx_runtime_kwargs
+
+    has_ndx_checkpoint = bool(args.ndx_checkpoint or os.getenv("NDX_REVE_CHECKPOINT"))
+    if not has_ndx_checkpoint and args.all:
+        clinical_models_map.pop("ndxreve", None)
+        bci_models_map.pop("ndxreve", None)
 
     if args.all:
         logger.info("Running all task/model combinations...")
@@ -335,7 +364,14 @@ def main():
 
             task_instance = task_cls()
             model_classes = list(models_map.items())
-            benchmark([task_instance], model_classes, args.seed, args.reps, task_key=task_key)
+            benchmark(
+                [task_instance],
+                model_classes,
+                args.seed,
+                args.reps,
+                task_key=task_key,
+                model_runtime_kwargs_map=model_runtime_kwargs_map,
+            )
 
     else:
         if not args.task or not args.model:
@@ -345,6 +381,8 @@ def main():
         model_keys = [m.strip().lower() for m in args.model.split(",") if m.strip()]
         if not model_keys:
             parser.error("At least one model must be specified.")
+        if "ndxreve" in model_keys and not has_ndx_checkpoint:
+            parser.error("Model 'ndxreve' requires --ndx-checkpoint or environment variable NDX_REVE_CHECKPOINT.")
 
         if task_key not in tasks_map:
             parser.error(f"Invalid task specified. Choose from: {', '.join(tasks_map.keys())}")
@@ -366,7 +404,14 @@ def main():
             )
 
         model_instances = [(model_key, models_map[model_key]) for model_key in model_keys]
-        benchmark([task_instance], model_instances, args.seed, args.reps, task_key=task_key)
+        benchmark(
+            [task_instance],
+            model_instances,
+            args.seed,
+            args.reps,
+            task_key=task_key,
+            model_runtime_kwargs_map=model_runtime_kwargs_map,
+        )
 
 if __name__ == "__main__":
     main()

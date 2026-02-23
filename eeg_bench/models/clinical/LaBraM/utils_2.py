@@ -345,7 +345,7 @@ def process_one_abnormal(parameters, output_queue):
         chs = [ch_name_pattern.format(ch) for ch in t_channels]
         signals = process_labram(raw, chs)
         out_freq = raw.info['sfreq']
-    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel", "NdxReveModel"}:
         t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
         t_channels = list(set(standard_1020).intersection(set(t_channels)))
         ch_name_pattern = "EEG {}-REF"
@@ -392,7 +392,7 @@ def process_one_epilepsy(parameters, output_queue):
             ch_name_pattern="EEG {}-REF"
         chs = [ch_name_pattern.format(ch) for ch in t_channels]
         signals = process_labram(raw, chs)
-    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel", "NdxReveModel"}:
         t_channels = ['C3', 'C4', 'CZ', 'F3', 'F4', 'F7', 'F8', 'FP1', 'FP2', 'FZ', 'O1', 'O2', 'P3', 'P4', 'PZ', 'T3', 'T4', 'T5', 'T6']
         t_channels = list(set(standard_1020).intersection(set(t_channels)))
         if "le" in montage:
@@ -439,7 +439,7 @@ def process_one_multilabel(parameters, output_queue):
         raw = process_filter(raw, 200)
         signals = raw.get_data(units="uV")
         out_channels = list(raw.ch_names)
-    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel", "NdxReveModel"}:
         t_channels = sorted(list(set(standard_1020).intersection(set(raw.ch_names))))
         if len(t_channels) == 0:
             print("WARN: No channels from this sample match with those known to ReveBase/EEGEmbed. Keeping original channels")
@@ -590,7 +590,7 @@ def process_one_cli_unm(parameters, output_queue):
         # resample data
         signals = resample(signals.astype(np.float32), sfreq, 250, axis=1, filter='kaiser_best')
         out_freq = 250
-    elif model_name in {"ReveBaseModel", "EEGEmbedModel"}:
+    elif model_name in {"ReveBaseModel", "EEGEmbedModel", "NdxReveModel"}:
         ch_names = [ch.upper() for ch in o_channels]
         t_channels = get_channels(task_name)
         t_channels = [c.upper() for c in t_channels]

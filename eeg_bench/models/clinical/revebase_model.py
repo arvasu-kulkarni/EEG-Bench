@@ -3,8 +3,11 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple, cast
 
 import numpy as np
+import os
 import torch
 import torch.nn as nn
+from huggingface_hub import snapshot_download
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from transformers import AutoModel
 from tqdm import tqdm
@@ -24,6 +27,13 @@ class ReveBaseModel(AbstractModel):
         embedding_dim: Optional[int] = None,
         num_classes: int = 2,
         num_labels_per_chunk: Optional[int] = None,
+        linear_probe_epochs: int = 3,
+        warmup_epochs: int = 5,
+        warmup_start_factor: float = 0.1,
+        mixup_alpha: float = 0.4,
+        plateau_factor: float = 0.5,
+        plateau_patience: int = 3,
+        plateau_min_lr: float = 1e-6,
     ):
         super().__init__("ReveBaseModel")
         assert torch.cuda.is_available(), "CUDA is not available"
@@ -39,16 +49,22 @@ class ReveBaseModel(AbstractModel):
         self.is_multilabel_task = num_labels_per_chunk is not None
         self.use_cache = True
 
-        self.model = AutoModel.from_pretrained(
-            "brain-bzh/reve-base",
-            trust_remote_code=True,
-            token=True,
-        ).to(self.device)
-        self.pos_bank = AutoModel.from_pretrained(
-            "brain-bzh/reve-positions",
-            trust_remote_code=True,
-            token=True,
-        )
+        self.linear_probe_epochs = max(0, linear_probe_epochs)
+        self.warmup_epochs = max(0, warmup_epochs)
+        self.warmup_start_factor = float(warmup_start_factor)
+        self.mixup_alpha = float(mixup_alpha)
+        self.plateau_factor = float(plateau_factor)
+        self.plateau_patience = int(plateau_patience)
+        self.plateau_min_lr = float(plateau_min_lr)
+
+        hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
+        def load_repo(repo_id: str):
+            local = snapshot_download(repo_id=repo_id, token=hf_token)
+            return AutoModel.from_pretrained(local, trust_remote_code=True, local_files_only=True)
+
+        self.model = load_repo("brain-bzh/reve-base").to(self.device)
+        self.pos_bank = load_repo("brain-bzh/reve-positions")
 
         dim = embedding_dim if embedding_dim is not None else 45056
         self.model.final_layer = torch.nn.Sequential(
@@ -60,6 +76,31 @@ class ReveBaseModel(AbstractModel):
 
         self.task_name: Optional[str] = None
         self.default_channels: Optional[List[str]] = None
+
+    def _set_two_step_trainable(self, train_backbone: bool) -> None:
+        for name, param in self.model.named_parameters():
+            if name.startswith("final_layer"):
+                param.requires_grad = True
+            else:
+                param.requires_grad = train_backbone
+
+    def _apply_mixup(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        if self.mixup_alpha <= 0.0 or x.shape[0] < 2:
+            return x, y, y, 1.0
+        lam = float(np.random.beta(self.mixup_alpha, self.mixup_alpha))
+        index = torch.randperm(x.shape[0], device=x.device)
+        mixed_x = lam * x + (1.0 - lam) * x[index]
+        y_a, y_b = y, y[index]
+        return mixed_x, y_a, y_b, lam
+
+    def _set_warmup_lr(self, optimizer: torch.optim.Optimizer, epoch_idx: int) -> None:
+        if self.warmup_epochs <= 0 or epoch_idx >= self.warmup_epochs:
+            return
+        warmup_progress = float(epoch_idx + 1) / float(self.warmup_epochs)
+        lr_scale = self.warmup_start_factor + (1.0 - self.warmup_start_factor) * warmup_progress
+        lr_scale = min(1.0, max(0.0, lr_scale))
+        for group in optimizer.param_groups:
+            group["lr"] = self.lr * lr_scale
 
     def _make_positions(self, ch_names: List[str]) -> Tuple[torch.Tensor, List[str]]:
         pos = self.pos_bank(ch_names)
@@ -153,29 +194,37 @@ class ReveBaseModel(AbstractModel):
             is_train=True,
             use_cache=self.use_cache,
         )
-        val_split = 0.2
-        if val_split is not None:
-            dataset_train, dataset_val = dataset_train.split_train_val(val_split)
-        else:
-            dataset_val = None
 
         if self.chunk_len_s is None:
             batch_size = 1
         else:
             batch_size = self.batch_size
         train_loader = DataLoader(dataset_train, batch_size=batch_size, num_workers=0, shuffle=True)
-        valid_loader = None
-        if dataset_val is not None:
-            valid_loader = DataLoader(dataset_val, batch_size=batch_size, num_workers=0, shuffle=False)
 
         optimizer = torch.optim.AdamW(
             list(self.model.parameters()),
             lr=self.lr,
             weight_decay=self.weight_decay,
         )
+        scheduler = ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=self.plateau_factor,
+            patience=self.plateau_patience,
+            min_lr=self.plateau_min_lr,
+        )
+
+        self._set_two_step_trainable(train_backbone=False)
+        stage2_start = min(max(0, self.linear_probe_epochs), self.epochs)
 
         self.model.train()
-        for _ in range(self.epochs):
+        for epoch in range(self.epochs):
+            if epoch == stage2_start:
+                self._set_two_step_trainable(train_backbone=True)
+            self._set_warmup_lr(optimizer, epoch)
+
+            epoch_loss_sum = 0.0
+            epoch_batches = 0
             for xb, yb, channels in tqdm(train_loader, desc="Training", leave=False):
                 ch_names = self._extract_channels(channels)
                 if xb.ndim == 2:
@@ -183,37 +232,26 @@ class ReveBaseModel(AbstractModel):
                 xb = xb.to(self.device, dtype=torch.float32)
                 xb, posb = self._select_channels_and_pos(xb, ch_names)
                 xb, posb = self._align_time_and_pos(xb, posb, ch_names)
-                yb = torch.as_tensor(yb, device=self.device)
-                if not self.is_multilabel_task:
-                    yb = yb.long()
+
+                yb = torch.as_tensor(yb, device=self.device).long()
+                xb, y_a, y_b, lam = self._apply_mixup(xb, yb)
 
                 optimizer.zero_grad()
                 logits = self._forward(xb, posb)
                 if self.is_multilabel_task:
                     logits = logits.reshape((logits.shape[0], self.num_classes, -1))
-                loss = criterion(logits, yb)
+                if lam < 1.0:
+                    loss = lam * criterion(logits, y_a) + (1.0 - lam) * criterion(logits, y_b)
+                else:
+                    loss = criterion(logits, y_a)
                 loss.backward()
                 optimizer.step()
 
-            if valid_loader is None:
-                continue
-            self.model.eval()
-            with torch.no_grad():
-                for xb, yb, channels in tqdm(valid_loader, desc="Validation", leave=False):
-                    ch_names = self._extract_channels(channels)
-                    if xb.ndim == 2:
-                        xb = xb.unsqueeze(0)
-                    xb = xb.to(self.device, dtype=torch.float32)
-                    xb, posb = self._select_channels_and_pos(xb, ch_names)
-                    xb, posb = self._align_time_and_pos(xb, posb, ch_names)
-                    yb = torch.as_tensor(yb, device=self.device)
-                    if not self.is_multilabel_task:
-                        yb = yb.long()
-                    logits = self._forward(xb, posb)
-                    if self.is_multilabel_task:
-                        logits = logits.reshape((logits.shape[0], self.num_classes, -1))
-                    _ = criterion(logits, yb)
-            self.model.train()
+                epoch_loss_sum += float(loss.detach().item())
+                epoch_batches += 1
+
+            if epoch >= self.warmup_epochs and epoch_batches > 0:
+                scheduler.step(epoch_loss_sum / float(epoch_batches))
 
     @torch.no_grad()
     def predict(self, X: List[np.ndarray], meta: List[Dict]) -> np.ndarray:

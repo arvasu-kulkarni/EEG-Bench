@@ -50,7 +50,7 @@ POSITIONS = {
 # 1. MODEL WRAPPER (Your MAE -> Classifier)
 # ==========================================
 class MyReveClassifier(nn.Module):
-    def __init__(self, checkpoint_path, num_classes=2, flat_dim=512):
+    def __init__(self, checkpoint_path, num_classes=2, flat_dim=512, dropout: float = 0.1):
         super().__init__()
 
         print(f"Loading checkpoint from {checkpoint_path}...")
@@ -80,7 +80,7 @@ class MyReveClassifier(nn.Module):
         self.final_layer = nn.Sequential(
             nn.Flatten(),
             nn.RMSNorm(self.flat_dim),  # Tutorial uses RMSNorm
-            nn.Dropout(0.1),
+            nn.Dropout(float(dropout)),
             nn.Linear(self.flat_dim, num_classes),
         )
 

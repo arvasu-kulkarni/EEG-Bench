@@ -5,3 +5,4 @@ from .bendr_model import BENDRModel
 from .neurogpt_model import NeuroGPTModel
 from .revebase_model import ReveBaseModel
 from .eegembed_model import EEGEmbedModel
+from .ndxreve_model import NdxReveModel
